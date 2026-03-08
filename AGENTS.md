@@ -1,31 +1,22 @@
-# Agent Instructions (AFS)
+# AGENTS.md (Compact)
 
-## Do not invent or market
-- No marketing language or product claims.
-- If something is unknown, state "Unknown / needs verification" and propose a test.
+Purpose: high-signal operating rules only.
 
-## Truth policy
-- Only claim what is evidenced in this repo or cited notes.
-- Do not guess roadmap, compatibility, or performance.
+Core Rules
+1. Clarify goals, constraints, and done criteria before major edits.
+2. Prefer the smallest working change over architecture churn.
+3. Read local `README.md` and nearby docs before coding.
+4. Touch only task-related files.
+5. Keep hygiene high: no dead code or commented-out leftovers.
+6. Run the fastest relevant verification command before finishing.
+7. If checks cannot run, report exactly why and residual risk.
+8. Ask before destructive actions (`rm`, force-push, history rewrite).
 
-## Scope control
-- Research-only; keep scope to core AFS primitives and APIs.
+Delivery Contract
+- Report what changed.
+- Report what was verified.
+- Report known gaps or follow-ups.
 
-## CLI surface
-- Preferred entrypoint: `afs` (installed) or `scripts/afs` (repo wrapper).
-- Shell setup: `scripts/afs-shell-init.sh` (bash/zsh).
-- Context warm: `scripts/afs-warm` or `afs agents run context-warm -- --interval 0`.
-
-## Workspace integration
-- If operating inside the Scawful workspace, consult `~/src/docs/NERV_INFRASTRUCTURE.md` and `~/src/docs/SRC_UNIVERSE_NETWORK.md`.
-- Prefer SSH host aliases and mounts instead of hardcoded IPs.
-
-## Provenance / separation
-- Do not use employer or internal material.
-- If provenance is unclear, leave it out.
-
-## Output style
-- Concise, engineering notebook tone.
-
-## How to verify (tests/commands)
-- `pytest`
+Reference Material
+- Detailed historical guidance: `.context/knowledge/agent-reference.md`.
+- Project docs remain the source of truth for architecture and workflows.

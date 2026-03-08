@@ -387,6 +387,7 @@ class ServiceManager:
         python = self._resolve_python_executable()
         repo_root = self._find_repo_root()
         afs_root = repo_root or Path.home() / "src" / "lab" / "afs"
+        working_root = repo_root or afs_root
         environment = self._service_environment()
         context_root = self.config.general.context_root
         agent_output_dir = context_root / "scratchpad" / "afs_agents"
@@ -445,7 +446,7 @@ class ServiceManager:
                 label="AFS Gateway",
                 description="OpenAI-compatible API gateway",
                 command=[python, "-m", "uvicorn", "afs.gateway.server:app", "--host", "0.0.0.0", "--port", "8000"],
-                working_directory=repo_root,
+                working_directory=working_root,
                 environment=environment,
                 service_type=ServiceType.DAEMON,
                 keep_alive=True,
@@ -456,7 +457,7 @@ class ServiceManager:
                 label="AFS Orchestrator",
                 description="Routing and coordination for local agents",
                 command=[python, "-m", "afs.orchestration", "--daemon"],
-                working_directory=repo_root,
+                working_directory=working_root,
                 environment=environment,
                 service_type=ServiceType.DAEMON,
                 keep_alive=True,
@@ -467,7 +468,7 @@ class ServiceManager:
                 label="AFS Context Discovery",
                 description="Discover and index AFS contexts",
                 command=[python, "-m", "afs", "context", "discover"],
-                working_directory=repo_root,
+                working_directory=working_root,
                 environment=environment,
                 service_type=ServiceType.ONESHOT,
                 keep_alive=False,
@@ -478,7 +479,7 @@ class ServiceManager:
                 label="AFS Context Graph Export",
                 description="Export AFS context graph JSON",
                 command=[python, "-m", "afs", "graph", "export"],
-                working_directory=repo_root,
+                working_directory=working_root,
                 environment=environment,
                 service_type=ServiceType.ONESHOT,
                 keep_alive=False,
@@ -495,7 +496,7 @@ class ServiceManager:
                     "--output",
                     str(agent_output_dir / "context_audit.json"),
                 ],
-                working_directory=repo_root,
+                working_directory=working_root,
                 environment=environment,
                 service_type=ServiceType.ONESHOT,
                 keep_alive=False,
@@ -512,7 +513,7 @@ class ServiceManager:
                     "--output",
                     str(agent_output_dir / "context_inventory.json"),
                 ],
-                working_directory=repo_root,
+                working_directory=working_root,
                 environment=environment,
                 service_type=ServiceType.ONESHOT,
                 keep_alive=False,
@@ -521,9 +522,9 @@ class ServiceManager:
             "memory-export": ServiceDefinition(
                 name="memory-export",
                 label="AFS Memory Export",
-                description="Export memory entries into training JSONL on an interval",
+                description="Export memory entries into JSONL on an interval",
                 command=memory_command,
-                working_directory=repo_root,
+                working_directory=working_root,
                 environment=environment,
                 service_type=ServiceType.DAEMON,
                 keep_alive=True,
@@ -534,7 +535,7 @@ class ServiceManager:
                 label="AFS Context Warm",
                 description="Sync workspace paths, discover contexts, and refresh embeddings on an interval",
                 command=context_warm_command,
-                working_directory=repo_root,
+                working_directory=working_root,
                 environment=environment,
                 service_type=ServiceType.DAEMON,
                 keep_alive=True,
@@ -564,8 +565,18 @@ class ServiceManager:
     def _service_environment(self) -> dict[str, str]:
         env: dict[str, str] = {}
         repo_root = self._find_repo_root()
+        if not repo_root:
+            afs_root_env = os.environ.get("AFS_ROOT")
+            if afs_root_env:
+                candidate = Path(afs_root_env)
+                if candidate.exists():
+                    repo_root = candidate
         if repo_root and (repo_root / "src").exists():
-            env["PYTHONPATH"] = str(repo_root / "src")
+            repo_src = str(repo_root / "src")
+            existing = os.environ.get("PYTHONPATH")
+            env["PYTHONPATH"] = (
+                f"{repo_src}{os.pathsep}{existing}" if existing else repo_src
+            )
         user_config = Path.home() / ".config" / "afs" / "config.toml"
         if user_config.exists():
             env["AFS_CONFIG_PATH"] = str(user_config)

@@ -26,9 +26,10 @@ services:
     image: ghcr.io/berriai/litellm:main
     container_name: afs-chat-litellm
     restart: unless-stopped
-    platform: linux/amd64
     profiles:
       - litellm
+    ports:
+      - "4000:4000"
     env_file:
       - ${HOME}/.config/afs/litellm.env
     volumes:

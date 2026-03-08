@@ -15,12 +15,32 @@ Usage:
 import argparse
 import sys
 import re
-import httpx
+import os
 from typing import Optional, Tuple
 
-# Import base orchestrator config
-from orchestrator import AGENTS, BACKENDS, call_lmstudio, call_lmstudio_completions, call_ollama
-import os
+# Import base orchestrator helpers (registry-aware)
+from orchestrator import (
+    load_registry,
+    resolve_base_url,
+    resolve_api_key,
+    call_ollama,
+    call_openai_compatible,
+    BACKEND_ALIASES,
+)
+
+_AGENTS_CACHE: Optional[dict] = None
+
+
+def _load_agents() -> dict:
+    global _AGENTS_CACHE
+    if _AGENTS_CACHE is None:
+        try:
+            agents, _ = load_registry()
+        except SystemExit as exc:
+            print(f"Registry unavailable: {exc}", file=sys.stderr)
+            agents = {}
+        _AGENTS_CACHE = agents
+    return _AGENTS_CACHE
 
 # Remote inference configuration
 REMOTE_BACKENDS = {
@@ -51,6 +71,32 @@ def get_lmstudio_host() -> str:
     except:
         pass
     return "http://localhost:1234"
+
+
+def _lmstudio_base_url(remote: bool = False) -> str:
+    if remote:
+        override = BACKEND_ALIASES.get("lmstudio-remote")
+        if override:
+            return override.base_url
+        return get_lmstudio_host().rstrip("/") + "/v1"
+    override = BACKEND_ALIASES.get("lmstudio")
+    if override:
+        return override.base_url
+    return "http://localhost:1234/v1"
+
+
+def call_lmstudio(model: str, messages: list, base_url: str | None = None, params: dict | None = None) -> str:
+    url = base_url or _lmstudio_base_url(remote=False)
+    return call_openai_compatible(model, messages, base_url=url, api_key=None, params=params)
+
+
+def call_lmstudio_completions(model: str, prompt: str, base_url: str | None = None, params: dict | None = None) -> str:
+    messages = [{"role": "user", "content": prompt}]
+    return call_lmstudio(model, messages, base_url=base_url, params=params)
+
+
+def call_lmstudio_remote(model: str, messages: list) -> str:
+    return call_lmstudio(model, messages, base_url=_lmstudio_base_url(remote=True))
 
 # Expert domains and their keywords for fallback routing
 EXPERT_PATTERNS = {
@@ -224,63 +270,49 @@ def call_expert(expert: str, prompt: str, verbose: bool = False, remote: bool = 
     # For remote, prefer LMStudio agents since that's what's on medical-mechanica
     agent_name = get_agent_for_expert(expert, prefer_lmstudio=True)
 
-    if agent_name not in AGENTS:
-        print(f"Error: Agent '{agent_name}' not configured")
+    agents = _load_agents()
+    if agent_name not in agents:
+        print(f"Error: Agent '{agent_name}' not configured (check chat_registry.toml)")
         sys.exit(1)
 
-    agent_config = AGENTS[agent_name]
+    agent_config = agents[agent_name]
     model_name = agent_config["model"]
-    backend = agent_config.get("backend", "ollama")
+    provider = (agent_config.get("provider") or "studio").lower()
 
-    # Override to remote if requested
-    if remote and backend == "ollama":
-        backend = "ollama-remote"
-    elif remote and backend == "lmstudio":
-        backend = "lmstudio-remote"
+    override = None
+    if remote and provider == "ollama":
+        override = BACKEND_ALIASES.get("ollama-remote")
+    elif remote and provider == "studio":
+        override = BACKEND_ALIASES.get("lmstudio-remote")
+
+    base_url = resolve_base_url(provider, agent_config, override)
+    api_key = resolve_api_key(provider, agent_config)
+    params = agent_config.get("parameters") or {}
 
     messages = []
-    if "system" in agent_config and "baked" not in agent_config.get("system", ""):
-        messages.append({"role": "system", "content": agent_config["system"]})
+    system_prompt = agent_config.get("system") or ""
+    if system_prompt and "baked" not in system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
 
     if verbose:
-        print(f"Invoking {agent_name} ({model_name}) via {backend}...")
+        print(f"Invoking {agent_name} ({model_name}) via {provider}...")
 
     try:
-        if backend == "lmstudio" or backend == "lmstudio-remote":
-            return call_lmstudio_remote(model_name, messages) if remote else call_lmstudio(model_name, messages)
-        elif backend in ("ollama-remote",):
-            return call_ollama(model_name, messages, remote=True)
-        else:
-            return call_ollama(model_name, messages, remote=False)
+        if provider == "ollama":
+            return call_ollama(model_name, messages, host=base_url)
+        if provider in {"openai", "openrouter", "litellm", "anthropic", "gemini", "vertex"} and not api_key:
+            return f"Missing API key for provider '{provider}'."
+        return call_openai_compatible(
+            model_name,
+            messages,
+            base_url=base_url,
+            api_key=api_key if provider != "studio" else None,
+            params=params,
+        )
     except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
-
-
-def call_lmstudio_remote(model: str, messages: list) -> str:
-    """Call remote LMStudio on medical-mechanica."""
-    import httpx
-
-    payload = {
-        "model": model,
-        "messages": messages,
-        "temperature": 0.4,
-        "max_tokens": 1024,
-    }
-
-    with httpx.Client(timeout=180.0) as client:
-        response = client.post(
-            "http://medical-mechanica:1234/v1/chat/completions",
-            json=payload,
-        )
-        data = response.json()
-
-        if "error" in data:
-            raise RuntimeError(data["error"])
-
-        response.raise_for_status()
-        return data["choices"][0]["message"]["content"]
 
 
 def interactive_mode(verbose: bool = False):
