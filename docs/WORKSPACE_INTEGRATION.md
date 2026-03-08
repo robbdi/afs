@@ -28,3 +28,21 @@ Use SSH host aliases rather than hardcoded IPs.
 - Use `ws` for workspace navigation (`ws list`, `ws go`, `ws status`).
 - Use `afs` CLI for context operations and mounts.
 - Use `afs workspace sync --root ~/src` to mirror `WORKSPACE.toml` paths into AFS discovery.
+
+## Monorepo Bridge
+
+AFS reserves `.context/monorepo/` for workspace bridge state.
+
+Expected file:
+
+- `.context/monorepo/active_workspace.toml`
+
+Recommended pattern:
+
+- let your workspace switch tool update that file on each switch
+- use `afs health` to catch stale bridge state
+- keep the bridge machine-local instead of committing it into project repos
+
+Template hook:
+
+- `extensions/afs_google/hooks/context-sync-active-workspace.sh`

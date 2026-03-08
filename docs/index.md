@@ -15,31 +15,37 @@ It provides filesystem-native primitives for:
 
 ```bash
 # Initialize context for current project
-afs context init
+./scripts/afs context init
 
 # Show active profile and switch if needed
-afs profile current
-afs profile switch work
+./scripts/afs profile current
+./scripts/afs profile switch work
 
 # Inspect profile mounts
-afs context profile-show --profile work
-afs context profile-apply --profile work
+./scripts/afs context profile-show --profile work
+./scripts/afs context profile-apply --profile work
 
 # Run MCP server
-afs mcp serve
+./scripts/afs mcp serve
 
 # Diagnose context/mount/extension state
-afs health
+./scripts/afs health
 ```
 
 ## Core Docs
 
+- [Agent Surfaces](AGENT_SURFACES.md)
 - [Architecture](ARCHITECTURE.md)
 - [Profiles and Hooks](PROFILES.md)
 - [Extensions](PLUGINS.md)
 - [MCP Server](MCP_SERVER.md)
 - [Memory and Context Layout](MEMORY_SYSTEM.md)
 - [CLI Reference](CLI_REFERENCE.md)
+
+## Agent Note
+
+For local automation, prefer `./scripts/afs <command>` over bare `python -m afs`
+unless the package is already installed in the Python environment the agent uses.
 
 ## Scope Boundary
 

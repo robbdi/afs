@@ -5,16 +5,21 @@ AFS provides a lightweight stdio MCP server for context operations.
 ## Run
 
 ```bash
-python -m afs.mcp_server
-# or
+~/src/lab/afs/scripts/afs mcp serve
+# or, from an environment where `afs` is installed
 afs mcp serve
+# or
+python3 -m afs.mcp_server
 ```
 
 ## Gemini CLI Registration
 
 ```bash
-gemini mcp add afs python -m afs.mcp_server
+gemini mcp add afs /Users/scawful/src/lab/afs/scripts/afs mcp serve
 ```
+
+If Gemini is running inside an environment where `afs` is already installed,
+`python3 -m afs.mcp_server` also works.
 
 ## Antigravity Custom Config
 
@@ -24,8 +29,8 @@ In Antigravity, open `MCP Servers -> Manage MCP Servers -> View raw config`, the
 {
   "mcpServers": {
     "afs": {
-      "command": "python",
-      "args": ["-m", "afs.mcp_server"]
+      "command": "/Users/scawful/src/lab/afs/scripts/afs",
+      "args": ["mcp", "serve"]
     }
   }
 }

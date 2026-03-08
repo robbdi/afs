@@ -1,36 +1,46 @@
 # Agent Surfaces (CLI + MCP)
 
-AFS is CLI-first. MCP is optional for clients that prefer a tool surface.
+AFS is CLI-first. The built-in MCP server is the preferred structured tool
+surface for Gemini, Antigravity, and other MCP-aware clients.
 
-## CLI (preferred)
+## Preferred Entry Point
 
-Use the installed `afs` entrypoint when available. If it is not on `PATH`, use
-the repo wrapper:
+Use the repo wrapper during local development:
 
 ```bash
 ~/src/lab/afs/scripts/afs status
 ```
 
-The wrapper sets `AFS_ROOT` and `PYTHONPATH` automatically.
+Why:
+
+- it sets `AFS_ROOT`
+- it adds repo `src/` to `PYTHONPATH`
+- it avoids relying on whichever `python` happens to be first on `PATH`
+
+Use the installed `afs` entrypoint only after `pip install -e .` into the
+environment the agent actually runs in.
 
 Help:
-- `afs` (defaults + command tree)
-- `afs help <command>` or `afs <command> --help`
 
-## Shell setup (bash/zsh)
+- `~/src/lab/afs/scripts/afs`
+- `~/src/lab/afs/scripts/afs help <command>`
+- `~/src/lab/afs/scripts/afs <command> --help`
 
-Add this to `~/.bashrc` or `~/.zshrc`:
+## Shell Setup
+
+For interactive shells:
 
 ```bash
 source ~/src/lab/afs/scripts/afs-shell-init.sh
 ```
 
 This exports:
-- `AFS_ROOT` (repo root)
-- `AFS_CLI` (full path to the wrapper)
-- `PATH` updated to include `~/src/lab/afs/scripts`
 
-## Venv setup (recommended for agents)
+- `AFS_ROOT`
+- `AFS_CLI`
+- `PATH` including `~/src/lab/afs/scripts`
+
+## Venv Setup
 
 Bootstrap a repo-local venv:
 
@@ -38,48 +48,83 @@ Bootstrap a repo-local venv:
 ~/src/lab/afs/scripts/afs-venv
 ```
 
-Optional extras (comma-separated):
+Optional extras:
 
 ```bash
 AFS_VENV_EXTRAS=test ~/src/lab/afs/scripts/afs-venv
 ```
 
-For Gemini agents, point to the wrapper and venv so subprocess calls are stable:
+For non-interactive agents:
 
 ```bash
 export AFS_CLI=~/src/lab/afs/scripts/afs
 export AFS_VENV=~/src/lab/afs/.venv
 ```
 
-## Agent runtime (non-interactive)
+## Useful Agent Commands
 
-Use one of:
-- `AFS_CLI=~/src/lab/afs/scripts/afs`
-- `~/src/lab/afs/scripts/afs <command>`
-- `PYTHONPATH=~/src/lab/afs/src python3 -m afs <command>`
+```bash
+~/src/lab/afs/scripts/afs context discover --path ~/src
+~/src/lab/afs/scripts/afs context ensure-all --path ~/src
+~/src/lab/afs/scripts/afs profile current
+~/src/lab/afs/scripts/afs skills list --profile work
+~/src/lab/afs/scripts/afs health
+```
 
 Warm context/cache:
-- `~/src/lab/afs/scripts/afs-warm`
+
+```bash
+~/src/lab/afs/scripts/afs-warm
+```
 
 Agent contract:
+
 - `~/.context/AFS_SPEC.md`
+- `./AGENTS.md`
+- `./docs/PROFILES.md`
 
-## MCP (optional)
+## MCP
 
-If an MCP client needs direct filesystem access to context state, run a
-filesystem MCP server scoped to `~/.context` (and any project `.context`).
-Requires an MCP filesystem server installation.
+Run the built-in stdio MCP server:
+
+```bash
+~/src/lab/afs/scripts/afs mcp serve
+```
+
+Built-in tools:
+
+- `fs.read`
+- `fs.write`
+- `fs.list`
+- `context.discover`
+- `context.mount`
+
+Paths are scoped to:
+
+- `~/.context`
+- configured `general.context_root`
+- local project `.context`
+
+## Gemini / Antigravity Registration
+
+Recommended command target:
+
+```bash
+~/src/lab/afs/scripts/afs mcp serve
+```
+
+Antigravity raw config example:
 
 ```json
 {
   "mcpServers": {
-    "afs-context": {
-      "command": "mcp-server-filesystem",
-      "args": ["~/.context"]
+    "afs": {
+      "command": "/Users/scawful/src/lab/afs/scripts/afs",
+      "args": ["mcp", "serve"]
     }
   }
 }
 ```
 
-This exposes context files only; higher-level operations should still use the
-AFS CLI.
+If the client requires a Python module entrypoint instead, use a Python
+environment where `afs` is installed and run `python3 -m afs.mcp_server`.

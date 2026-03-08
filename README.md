@@ -31,18 +31,18 @@ Core `afs` now supports profile-driven context injection via `afs.toml`.
 Inspect and apply profiles:
 
 ```bash
-afs context profile-show --profile work
-afs context profile-apply --profile work
-afs profile current
-afs profile switch work
-afs health
+./scripts/afs context profile-show --profile work
+./scripts/afs context profile-apply --profile work
+./scripts/afs profile current
+./scripts/afs profile switch work
+./scripts/afs health
 ```
 
 Run the MCP server for Gemini/other MCP clients:
 
 ```bash
-python -m afs.mcp_server
-# or
+./scripts/afs mcp serve
+# or, after installing the package into the active environment
 afs mcp serve
 ```
 
@@ -52,14 +52,27 @@ afs mcp serve
     ```bash
     git clone https://github.com/scawful/afs.git
     cd afs
-    pip install -r requirements.txt
+    python3 -m venv .venv
+    source .venv/bin/activate
+    python3 -m pip install -e .
     ```
 
-2.  **Configuration:**
-    Configure your LLM providers and other settings in `config/`.
+2.  **Preferred local entrypoint:**
+    ```bash
+    ./scripts/afs --help
+    ```
+    The wrapper sets `AFS_ROOT` and `PYTHONPATH`, which is more reliable for agents than
+    depending on the shell's default `python`.
 
-3.  **Running Agents:**
-    Use the CLI tools to interact with agents and manage context.
+3.  **Configuration:**
+    Initialize config and context:
+    ```bash
+    ./scripts/afs init
+    ./scripts/afs context init
+    ```
+
+4.  **Running Agents:**
+    Use the CLI tools to manage context, profiles, skills, embeddings, and MCP.
 
 ## AFS Studio variants
 
@@ -77,7 +90,15 @@ The unified CLI in `tools/afs/` uses the manifest for app launch; "studio" there
 
 ## Documentation
 
-See the `docs/` directory for detailed guides and architectural overviews. Workspace map: `~/src/docs/SOURCE_UNIVERSE_MAP.md`.
+See the `docs/` directory for detailed guides and architectural overviews.
+Recommended starting points:
+
+- `docs/index.md`
+- `docs/AGENT_SURFACES.md`
+- `docs/CLI_REFERENCE.md`
+- `docs/PROFILES.md`
+
+Workspace map: `~/src/docs/SOURCE_UNIVERSE_MAP.md`.
 
 ## License
 

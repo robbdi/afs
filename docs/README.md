@@ -5,6 +5,7 @@ This docs set covers the **core AFS platform** in `lab/afs`.
 ## Read First
 
 - [Home](index.md)
+- [Agent Surfaces](AGENT_SURFACES.md)
 - [Architecture](ARCHITECTURE.md)
 - [Profiles, Skills, and Hooks](PROFILES.md)
 - [MCP Server](MCP_SERVER.md)

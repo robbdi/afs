@@ -53,8 +53,8 @@ afs fs write scratchpad notes.md --path ~/src/project-a --content "..."
 Profiles can mount external knowledge/skill/registry roots into context.
 
 ```bash
-afs context profile-show --profile work
-afs context profile-apply --profile work
+./scripts/afs context profile-show --profile work
+./scripts/afs context profile-apply --profile work
 ```
 
 ## Embedding Indexes
@@ -65,8 +65,8 @@ Embedding indexes are stored alongside mounted knowledge roots (for example,
 Use:
 
 ```bash
-afs embeddings index --knowledge-dir <path>
-afs embeddings search "<query>" --knowledge-dir <path>
+./scripts/afs embeddings index --knowledge-dir <path> --source <path>
+./scripts/afs embeddings search "<query>" --knowledge-dir <path>
 ```
 
 ## Monorepo Bridge
@@ -75,4 +75,4 @@ Workspace switch tooling should update:
 
 - `.context/monorepo/active_workspace.toml`
 
-AFS warns when this file is stale and surfaces status via `afs health`.
+AFS warns when this file is stale and surfaces status via `./scripts/afs health`.

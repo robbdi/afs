@@ -35,47 +35,50 @@ This page documents core AFS APIs and CLI surfaces in `lab/afs`.
 
 ## CLI Surface
 
+Use `./scripts/afs` during local development unless `afs` is installed in the
+active environment.
+
 ### Context
 
 ```bash
-afs context init
-afs context ensure
-afs context list
-afs context mount <mount_type> <source>
-afs context unmount <mount_type> <alias>
-afs context profile-show --profile <name>
-afs context profile-apply --profile <name>
+./scripts/afs context init
+./scripts/afs context ensure
+./scripts/afs context list
+./scripts/afs context mount <mount_type> <source>
+./scripts/afs context unmount <mount_type> <alias>
+./scripts/afs context profile-show --profile <name>
+./scripts/afs context profile-apply --profile <name>
 ```
 
 ### Profiles
 
 ```bash
-afs profile current
-afs profile list
-afs profile switch <name>
+./scripts/afs profile current
+./scripts/afs profile list
+./scripts/afs profile switch <name>
 ```
 
 ### MCP
 
 ```bash
-afs mcp serve
+./scripts/afs mcp serve
 ```
 
 ### Health
 
 ```bash
-afs health
-afs health check --level standard
-afs health status
+./scripts/afs health
+./scripts/afs health check --level standard
+./scripts/afs health status
 ```
 
 ### Skills and Embeddings
 
 ```bash
-afs skills list --profile <name>
-afs skills match "<query>" --profile <name>
-afs embeddings index --knowledge-dir <path>
-afs embeddings search "<query>" --knowledge-dir <path>
+./scripts/afs skills list --profile <name>
+./scripts/afs skills match "<query>" --profile <name>
+./scripts/afs embeddings index --knowledge-dir <path> --source <path>
+./scripts/afs embeddings search "<query>" --knowledge-dir <path>
 ```
 
 ## Config Keys (Core)

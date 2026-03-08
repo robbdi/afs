@@ -38,10 +38,10 @@ before_agent_dispatch = []
 ## Profile Commands
 
 ```bash
-afs context profile-show --profile work
-afs context profile-apply --profile work
-afs profile current
-afs profile switch work
+./scripts/afs context profile-show --profile work
+./scripts/afs context profile-apply --profile work
+./scripts/afs profile current
+./scripts/afs profile switch work
 ```
 
 `context init` and `context ensure` auto-apply the active profile when
@@ -63,8 +63,8 @@ profiles: ["work", "general"]
 Use:
 
 ```bash
-afs skills list --profile work
-afs skills match "debug mcp tool registration" --profile work
+./scripts/afs skills list --profile work
+./scripts/afs skills match "debug mcp tool registration" --profile work
 ```
 
 ## Monorepo Bridge
@@ -76,4 +76,4 @@ Template hook:
 
 - `extensions/afs_google/hooks/context-sync-active-workspace.sh`
 
-`afs health` reports when the bridge file is stale (older than one hour).
+`./scripts/afs health` reports when the bridge file is stale (older than one hour).

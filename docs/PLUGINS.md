@@ -29,8 +29,8 @@ Supported plugin hooks:
 Inspect resolved plugin state:
 
 ```bash
-afs plugins --details
-afs plugins --json
+./scripts/afs plugins --details
+./scripts/afs plugins --json
 ```
 
 ## Manifest Extensions

@@ -5,7 +5,7 @@ Use AFS health commands to diagnose profile/context/extension issues quickly.
 ## One-Command Snapshot
 
 ```bash
-afs health
+./scripts/afs health
 ```
 
 This reports:
@@ -20,33 +20,33 @@ This reports:
 ## JSON Output
 
 ```bash
-afs health --json
+./scripts/afs health --json
 ```
 
 ## Extended Checks
 
 ```bash
-afs health check --level basic
-afs health check --level standard
-afs health check --level comprehensive
+./scripts/afs health check --level basic
+./scripts/afs health check --level standard
+./scripts/afs health check --level comprehensive
 ```
 
 ## Monitor Mode
 
 ```bash
-afs health monitor --interval 60
+./scripts/afs health monitor --interval 60
 ```
 
 ## History and Trend
 
 ```bash
-afs health history --limit 10
-afs health trend --hours 24
+./scripts/afs health history --limit 10
+./scripts/afs health trend --hours 24
 ```
 
 ## Typical Workflow
 
-1. Run `afs health`.
-2. If profile or mounts look wrong, run `afs profile current` and `afs context profile-show`.
+1. Run `./scripts/afs health`.
+2. If profile or mounts look wrong, run `./scripts/afs profile current` and `./scripts/afs context profile-show`.
 3. If monorepo bridge is stale, refresh `monorepo/active_workspace.toml` via workspace switch hook.
-4. If MCP tools look wrong, check `afs mcp serve` and extension `[mcp_tools]` config.
+4. If MCP tools look wrong, check `./scripts/afs mcp serve` and extension `[mcp_tools]` config.

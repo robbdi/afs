@@ -34,6 +34,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Guides:
+    - Agent Surfaces: AGENT_SURFACES.md
     - Architecture: ARCHITECTURE.md
     - Profiles and Hooks: PROFILES.md
     - Extensions: PLUGINS.md
