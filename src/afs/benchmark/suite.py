@@ -7,20 +7,40 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .base import BenchmarkConfig, BenchmarkResult
-from .din import DinBenchmark
-from .nayru import FaroreBenchmark, NayruBenchmark, VeranBenchmark
+from .base import BenchmarkConfig, BenchmarkResult, BenchmarkRunner
+
+# Domain-specific runners loaded lazily (extension-owned)
+_DOMAIN_RUNNERS: dict[str, type[BenchmarkRunner]] = {}
+
+
+def _load_domain_runners() -> dict[str, type[BenchmarkRunner]]:
+    """Load domain benchmark runners if available."""
+    if _DOMAIN_RUNNERS:
+        return _DOMAIN_RUNNERS
+
+    try:
+        from .din import DinBenchmark
+        _DOMAIN_RUNNERS["din"] = DinBenchmark
+    except Exception:
+        pass
+
+    try:
+        from .nayru import FaroreBenchmark, NayruBenchmark, VeranBenchmark
+        _DOMAIN_RUNNERS["nayru"] = NayruBenchmark
+        _DOMAIN_RUNNERS["farore"] = FaroreBenchmark
+        _DOMAIN_RUNNERS["veran"] = VeranBenchmark
+    except Exception:
+        pass
+
+    return _DOMAIN_RUNNERS
 
 
 class BenchmarkSuite:
     """Suite for running benchmarks across all domains."""
 
-    RUNNERS = {
-        "din": DinBenchmark,
-        "nayru": NayruBenchmark,
-        "farore": FaroreBenchmark,
-        "veran": VeranBenchmark,
-    }
+    @property
+    def RUNNERS(self) -> dict[str, type[BenchmarkRunner]]:
+        return _load_domain_runners()
 
     def __init__(
         self,
@@ -64,11 +84,12 @@ class BenchmarkSuite:
 
     def run_domain(self, domain: str) -> BenchmarkResult:
         """Run benchmark for a single domain."""
-        if domain not in self.RUNNERS:
-            raise ValueError(f"Unknown domain: {domain}. Available: {list(self.RUNNERS.keys())}")
+        runners = self.RUNNERS
+        if domain not in runners:
+            raise ValueError(f"Unknown domain: {domain}. Available: {list(runners.keys())}")
 
         config = self._get_config(domain)
-        runner_cls = self.RUNNERS[domain]
+        runner_cls = runners[domain]
         runner = runner_cls(config)
 
         result = runner.run()
@@ -78,9 +99,14 @@ class BenchmarkSuite:
 
     def run_all(self, domains: list[str] | None = None) -> dict[str, BenchmarkResult]:
         """Run benchmarks for all (or specified) domains."""
-        domains = domains or list(self.RUNNERS.keys())
+        runners = self.RUNNERS
+        domains = domains or list(runners.keys())
 
         for domain in domains:
+            if domain not in runners:
+                print(f"Skipping {domain}: runner not available (install afs-scawful)")
+                continue
+
             config = self._get_config(domain)
             if not config.dataset_path.exists():
                 print(f"Skipping {domain}: dataset not found at {config.dataset_path}")
@@ -218,15 +244,9 @@ def run_benchmark(
         output_dir=output_dir or Path("benchmark_results"),
     )
 
-    runners = {
-        "din": DinBenchmark,
-        "nayru": NayruBenchmark,
-        "farore": FaroreBenchmark,
-        "veran": VeranBenchmark,
-    }
-
+    runners = _load_domain_runners()
     if domain not in runners:
-        raise ValueError(f"Unknown domain: {domain}")
+        raise ValueError(f"Unknown domain: {domain}. Available: {list(runners.keys())}")
 
     runner = runners[domain](config)
     return runner.run()

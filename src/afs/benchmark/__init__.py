@@ -1,10 +1,8 @@
-"""Benchmark suite for AFS expert models.
+"""Benchmark suite for AFS models.
 
-Provides standardized evaluation across all expert domains:
-- Din: Optimization metrics (cycle/byte reduction)
-- Nayru: Generation metrics (ASAR validity, entity coverage)
-- Farore: Debugging metrics (bug detection, fix accuracy)
-- Veran: Explanation metrics (concept coverage, accuracy)
+Core provides generic benchmark infrastructure (BenchmarkRunner, BenchmarkSuite).
+Domain-specific runners (Din, Nayru, Farore, Veran) are extension-owned
+and available when afs-scawful is installed.
 """
 
 from .base import (
@@ -15,9 +13,7 @@ from .base import (
     load_benchmark_items,
     save_benchmark_items,
 )
-from .din import DinBenchmark
 from .leaderboard import ComparisonResult, LeaderboardEntry, LeaderboardManager
-from .nayru import FaroreBenchmark, NayruBenchmark, VeranBenchmark
 from .suite import BenchmarkSuite, run_benchmark
 
 __all__ = [
@@ -28,11 +24,6 @@ __all__ = [
     "BenchmarkItem",
     "load_benchmark_items",
     "save_benchmark_items",
-    # Runners
-    "DinBenchmark",
-    "NayruBenchmark",
-    "FaroreBenchmark",
-    "VeranBenchmark",
     # Suite
     "BenchmarkSuite",
     "run_benchmark",
@@ -41,3 +32,18 @@ __all__ = [
     "LeaderboardEntry",
     "ComparisonResult",
 ]
+
+# Domain-specific runners (extension-owned, available with afs-scawful)
+try:
+    from .din import DinBenchmark
+
+    __all__.append("DinBenchmark")
+except Exception:
+    pass
+
+try:
+    from .nayru import FaroreBenchmark, NayruBenchmark, VeranBenchmark
+
+    __all__.extend(["NayruBenchmark", "FaroreBenchmark", "VeranBenchmark"])
+except Exception:
+    pass

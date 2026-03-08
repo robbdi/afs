@@ -1,19 +1,10 @@
-"""Training data generators for AFS."""
+"""Training data generators for AFS.
 
-from .asar_validator import (
-    AsarValidator,
-    AsarValidatorConfig,
-    ValidationResult,
-    ValidationStats,
-    check_asar_available,
-    validate_training_data,
-)
-from .asm_augment import (
-    AsmAugmentConfig,
-    AsmAugmentGenerator,
-    detect_category,
-    generate_paraphrases,
-)
+Core provides generic generator infrastructure (BaseGenerator, TrainingSample, CoT, model backends).
+Domain-specific generators (ASM augment, ASAR, curriculum, knowledge) are extension-owned
+and available when afs-scawful is installed.
+"""
+
 from .base import (
     BaseGenerator,
     GenerationResult,
@@ -32,24 +23,10 @@ from .cot import (
     LLMClient,
     format_cot_sample,
 )
-from .curriculum_generator import (
-    CurriculumGenerator,
-    CurriculumTemplate,
-    Difficulty,
-    ExpertDomain,
-    GenerationProgress,
-    ScaleConfig,
-    create_curriculum_generator,
-)
 from .data_cleaner import (
     CleaningStats,
     clean_dataset,
     clean_sample,
-)
-from .knowledge_generator import (
-    KnowledgeAwareGenerator,
-    KnowledgeGeneratorConfig,
-    create_knowledge_generator,
 )
 from .model_generator import (
     APIBackend,
@@ -77,11 +54,6 @@ __all__ = [
     "clean_instruction",
     "clean_sample_instruction",
     "is_malformed_output",
-    # ASM augmentation
-    "AsmAugmentConfig",
-    "AsmAugmentGenerator",
-    "detect_category",
-    "generate_paraphrases",
     # Chain of Thought
     "CotConfig",
     "CotGenerator",
@@ -93,13 +65,6 @@ __all__ = [
     "CleaningStats",
     "clean_dataset",
     "clean_sample",
-    # Asar validation
-    "AsarValidator",
-    "AsarValidatorConfig",
-    "ValidationResult",
-    "ValidationStats",
-    "check_asar_available",
-    "validate_training_data",
     # Model-based generation
     "ModelGenerator",
     "ModelGeneratorConfig",
@@ -112,16 +77,70 @@ __all__ = [
     "create_generator",
     "available_backends",
     "register_backend",
-    # Knowledge-aware generation
-    "KnowledgeAwareGenerator",
-    "KnowledgeGeneratorConfig",
-    "create_knowledge_generator",
-    # Curriculum-based generation (scaled)
-    "CurriculumGenerator",
-    "CurriculumTemplate",
-    "Difficulty",
-    "ExpertDomain",
-    "GenerationProgress",
-    "ScaleConfig",
-    "create_curriculum_generator",
 ]
+
+# Domain-specific generators (extension-owned, available with afs-scawful)
+try:
+    from .asar_validator import (
+        AsarValidator,
+        AsarValidatorConfig,
+        ValidationResult,
+        ValidationStats,
+        check_asar_available,
+        validate_training_data,
+    )
+
+    __all__.extend([
+        "AsarValidator", "AsarValidatorConfig", "ValidationResult",
+        "ValidationStats", "check_asar_available", "validate_training_data",
+    ])
+except Exception:
+    pass
+
+try:
+    from .asm_augment import (
+        AsmAugmentConfig,
+        AsmAugmentGenerator,
+        detect_category,
+        generate_paraphrases,
+    )
+
+    __all__.extend([
+        "AsmAugmentConfig", "AsmAugmentGenerator",
+        "detect_category", "generate_paraphrases",
+    ])
+except Exception:
+    pass
+
+try:
+    from .curriculum_generator import (
+        CurriculumGenerator,
+        CurriculumTemplate,
+        Difficulty,
+        ExpertDomain,
+        GenerationProgress,
+        ScaleConfig,
+        create_curriculum_generator,
+    )
+
+    __all__.extend([
+        "CurriculumGenerator", "CurriculumTemplate", "Difficulty",
+        "ExpertDomain", "GenerationProgress", "ScaleConfig",
+        "create_curriculum_generator",
+    ])
+except Exception:
+    pass
+
+try:
+    from .knowledge_generator import (
+        KnowledgeAwareGenerator,
+        KnowledgeGeneratorConfig,
+        create_knowledge_generator,
+    )
+
+    __all__.extend([
+        "KnowledgeAwareGenerator", "KnowledgeGeneratorConfig",
+        "create_knowledge_generator",
+    ])
+except Exception:
+    pass

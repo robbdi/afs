@@ -1,52 +1,14 @@
-"""65816 Assembly Tokenizer for AFS domain capabilities.
+"""Compatibility shim for legacy module now owned by afs-scawful.
 
-Part of the AFS (Agentic File System) domain-specific tooling for
-ALTTP/SNES assembly tasks. This module provides semantic tokenization
-that preserves opcodes, addresses, and indexed addressing modes.
-
-Used by AFS agents for:
-- Assembly code understanding and generation
-- Training domain-specific encoder models
-- Integration with the afs.knowledge and afs.training modules
-
-Usage:
-    from afs.tokenizer import ASMTokenizer
-
-    tokenizer = ASMTokenizer()
-    encoded = tokenizer.encode("LDA $7F00,X")
-    decoded = tokenizer.decode(encoded["input_ids"])
+65816 assembly tokenizer (semantic opcodes/addresses)
 """
 
-from .asm_tokenizer import ASMTokenizer, create_tokenizer
-from .pretokenizer import (
-    AssemblyPreTokenizer,
-    Token,
-    normalize_token,
-    split_address,
-)
-from .vocab import (
-    BASE_VOCAB,
-    DIRECTIVES,
-    OPCODES,
-    REGISTERS,
-    SPECIAL_TOKENS,
-    VOCAB_SIZE,
-)
+from __future__ import annotations
 
-__all__ = [
-    # Main tokenizer
-    "ASMTokenizer",
-    "create_tokenizer",
-    # Pre-tokenizer
-    "AssemblyPreTokenizer",
-    "Token",
-    "normalize_token",
-    "split_address",
-    # Vocabulary
-    "BASE_VOCAB",
-    "OPCODES",
-    "REGISTERS",
-    "DIRECTIVES",
-    "SPECIAL_TOKENS",
-    "VOCAB_SIZE",
-]
+try:
+    from afs_scawful.tokenizer import *  # type: ignore[F403]
+except Exception as exc:  # pragma: no cover - compatibility path
+    raise RuntimeError(
+        "Module 'afs_scawful.tokenizer' moved to the afs-scawful extension. "
+        "Install afs-scawful or add it to PYTHONPATH."
+    ) from exc

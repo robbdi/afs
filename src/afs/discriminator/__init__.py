@@ -1,38 +1,14 @@
-"""ASM-ELECTRA: Discriminator for 65816 assembly quality filtering.
+"""Compatibility shim for legacy module now owned by afs-scawful.
 
-This module provides tools for training an ELECTRA-based discriminator
-to distinguish real assembly code from LLM-generated errors, enabling:
-- Pre-training data filtering
-- Reward modeling for RLHF
-- Inference-time rejection sampling
+ASM-ELECTRA discriminator for assembly quality
 """
 
-from .data import ElectraDataset, ElectraSample, create_training_data
-from .electra import ASMElectra, ElectraConfig
-from .fake_generators import (
-    AddressingErrorGenerator,
-    CompositeGenerator,
-    FakeGenerator,
-    OpcodeSwapGenerator,
-    SyntaxErrorGenerator,
-)
-from .filter import FilterConfig, SampleFilter
+from __future__ import annotations
 
-__all__ = [
-    # Core
-    "ASMElectra",
-    "ElectraConfig",
-    # Generators
-    "FakeGenerator",
-    "SyntaxErrorGenerator",
-    "AddressingErrorGenerator",
-    "OpcodeSwapGenerator",
-    "CompositeGenerator",
-    # Data
-    "ElectraDataset",
-    "ElectraSample",
-    "create_training_data",
-    # Filtering
-    "SampleFilter",
-    "FilterConfig",
-]
+try:
+    from afs_scawful.discriminator import *  # type: ignore[F403]
+except Exception as exc:  # pragma: no cover - compatibility path
+    raise RuntimeError(
+        "Module 'afs_scawful.discriminator' moved to the afs-scawful extension. "
+        "Install afs-scawful or add it to PYTHONPATH."
+    ) from exc
