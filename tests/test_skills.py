@@ -18,9 +18,9 @@ def test_parse_skill_frontmatter() -> None:
 def test_discover_skills_profile_filter(tmp_path: Path) -> None:
     root = tmp_path / "skills"
     work_skill = root / "work" / "SKILL.md"
-    zelda_skill = root / "zelda" / "SKILL.md"
+    domain_skill = root / "specialized" / "SKILL.md"
     work_skill.parent.mkdir(parents=True)
-    zelda_skill.parent.mkdir(parents=True)
+    domain_skill.parent.mkdir(parents=True)
 
     work_skill.write_text(
         "---\n"
@@ -30,11 +30,11 @@ def test_discover_skills_profile_filter(tmp_path: Path) -> None:
         "---\n",
         encoding="utf-8",
     )
-    zelda_skill.write_text(
+    domain_skill.write_text(
         "---\n"
-        "name: zelda-skill\n"
-        "triggers: [alttp]\n"
-        "profiles: [zelda]\n"
+        "name: specialized-skill\n"
+        "triggers: [embedded]\n"
+        "profiles: [specialized]\n"
         "---\n",
         encoding="utf-8",
     )

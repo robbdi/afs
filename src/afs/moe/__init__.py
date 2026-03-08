@@ -1,23 +1,10 @@
-"""Mixture of Experts router for 65816 assembly models."""
+"""Compatibility shim for legacy MoE modules now owned by afs-scawful."""
 
-from .classifier import ClassificationResult, IntentClassifier, QueryIntent
-from .retriever import KnowledgeBase, RetrievalResult, Retriever, RetrieverConfig
-from .router import ExpertConfig, GenerationResult, MoERouter, RouterConfig, RoutingDecision
+from __future__ import annotations
 
-__all__ = [
-    # Router
-    "MoERouter",
-    "ExpertConfig",
-    "RouterConfig",
-    "RoutingDecision",
-    "GenerationResult",
-    # Classifier
-    "IntentClassifier",
-    "QueryIntent",
-    "ClassificationResult",
-    # Retriever
-    "Retriever",
-    "RetrieverConfig",
-    "RetrievalResult",
-    "KnowledgeBase",
-]
+try:
+    from afs_scawful.moe import *  # type: ignore[F403]
+except Exception as exc:  # pragma: no cover - compatibility path
+    raise RuntimeError(
+        "Legacy MoE modules moved to the afs-scawful extension."
+    ) from exc

@@ -1,5 +1,10 @@
-"""Evaluation suite for MoE router and expert models."""
+"""Compatibility shim for legacy MoE evaluation helpers now owned by afs-scawful."""
 
-from .runner import EvalMetrics, EvalResult, EvalRunner
+from __future__ import annotations
 
-__all__ = ["EvalRunner", "EvalResult", "EvalMetrics"]
+try:
+    from afs_scawful.moe.evals import *  # type: ignore[F403]
+except Exception as exc:  # pragma: no cover - compatibility path
+    raise RuntimeError(
+        "Legacy MoE evaluation helpers moved to the afs-scawful extension."
+    ) from exc

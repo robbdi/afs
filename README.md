@@ -86,7 +86,7 @@ The unified CLI in `tools/afs/` uses the manifest for app launch; "studio" there
 ## lab/afs vs lab/afs-scawful
 
 - **lab/afs** — Core research prototype: orchestration, context mounts, Python CLI and TUI. Shared upstream-friendly code.
-- **lab/afs-scawful** — Personal fork: scripts (e.g. afs-studio wrappers, afs-warm), policies, agent instructions, chat registry. Overrides and machine-specific config live here; the AFS CLI and Barista can read from it for "my defaults."
+- **lab/afs-scawful** — Personal fork: scripts (e.g. afs-studio wrappers, afs-warm), policies, agent instructions, chat registry, persona gateway, and MoE/orchestration surfaces. Overrides and machine-specific config live here; the AFS CLI and Barista can read from it for "my defaults."
 
 ## Documentation
 
