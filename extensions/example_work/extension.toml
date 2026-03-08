@@ -1,0 +1,14 @@
+name = "example_work"
+description = "Example extension manifest"
+
+knowledge_mounts = ["knowledge"]
+skill_roots = ["skills"]
+model_registries = ["registry"]
+
+cli_modules = []
+policies = []
+
+[hooks]
+before_context_read = []
+after_context_write = []
+before_agent_dispatch = []

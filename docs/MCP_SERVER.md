@@ -1,0 +1,44 @@
+# AFS MCP Server
+
+AFS provides a lightweight stdio MCP server for context operations.
+
+## Run
+
+```bash
+python -m afs.mcp_server
+# or
+afs mcp serve
+```
+
+## Gemini CLI Registration
+
+```bash
+gemini mcp add afs python -m afs.mcp_server
+```
+
+## Tools
+
+- `fs.read`
+- `fs.write`
+- `fs.list`
+- `context.discover`
+- `context.mount`
+
+Path operations are scoped to:
+
+- `~/.context`
+- configured `general.context_root`
+- local project `.context` under the current working directory
+
+## Example Call Shape
+
+`tools/call` expects:
+
+```json
+{
+  "name": "fs.read",
+  "arguments": {
+    "path": "~/.context/scratchpad/notes.md"
+  }
+}
+```

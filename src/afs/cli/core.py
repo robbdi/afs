@@ -66,12 +66,22 @@ def init_command(args: argparse.Namespace) -> int:
 def plugins_command(args: argparse.Namespace) -> int:
     """List or load plugins."""
     from ..config import load_config_model
-    from ..plugins import discover_plugins, load_plugins, resolve_plugins_config
+    from ..plugins import (
+        discover_extension_manifests,
+        discover_plugins,
+        load_enabled_extensions,
+        load_plugins,
+        resolve_extensions_config,
+        resolve_plugins_config,
+    )
 
     config_path = Path(args.config) if args.config else None
     config = load_config_model(config_path=config_path, merge_user=True)
     plugins_config = resolve_plugins_config(config)
     plugin_names = discover_plugins(plugins_config)
+    extensions_config = resolve_extensions_config(config)
+    extension_manifests = discover_extension_manifests(extensions_config)
+    loaded_extensions = load_enabled_extensions(config=config)
     loaded = {}
     if args.load:
         loaded = load_plugins(plugin_names, plugins_config.plugin_dirs)
@@ -88,6 +98,16 @@ def plugins_command(args: argparse.Namespace) -> int:
                     "status": "ok" if name in loaded else "failed" if args.load else "unknown",
                 }
                 for name in plugin_names
+            ],
+            "extension_dirs": [str(path) for path in extensions_config.extension_dirs],
+            "enabled_extensions": list(extensions_config.enabled_extensions),
+            "extensions": [
+                {
+                    "name": name,
+                    "manifest": str(path),
+                    "status": "ok" if name in loaded_extensions else "discovered",
+                }
+                for name, path in extension_manifests.items()
             ],
         }
         print(json.dumps(payload, indent=2))
@@ -113,6 +133,18 @@ def plugins_command(args: argparse.Namespace) -> int:
         print(f"enabled_plugins: {enabled}")
         print(f"auto_discover: {str(plugins_config.auto_discover).lower()}")
         print(f"auto_discover_prefixes: {prefixes}")
+        extension_dirs = (
+            ", ".join(str(path) for path in extensions_config.extension_dirs)
+            if extensions_config.extension_dirs
+            else "(none)"
+        )
+        enabled_extensions = (
+            ", ".join(extensions_config.enabled_extensions)
+            if extensions_config.enabled_extensions
+            else "(none)"
+        )
+        print(f"extension_dirs: {extension_dirs}")
+        print(f"enabled_extensions: {enabled_extensions}")
 
     if args.load:
         for name in plugin_names:

@@ -1,0 +1,26 @@
+name = "afs_google"
+description = "Google work profile adapter for Gemini-first workflows"
+
+knowledge_mounts = [
+  "knowledge/gemini",
+  "knowledge/work",
+]
+
+skill_roots = [
+  "skills",
+]
+
+model_registries = [
+  "config/chat_registry.toml",
+]
+
+# Optional Python modules that can add extra `afs` CLI commands.
+cli_modules = []
+
+# Enforce work-context grounding.
+policies = ["no_zelda"]
+
+[hooks]
+before_context_read = []
+after_context_write = []
+before_agent_dispatch = []

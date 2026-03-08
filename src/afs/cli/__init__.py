@@ -11,6 +11,7 @@ Commands are organized into logical groups:
 from __future__ import annotations
 
 import argparse
+import importlib
 import sys
 from collections.abc import Iterable
 
@@ -31,8 +32,10 @@ from . import (
     gateway,
     generator,
     generators,
+    mcp,
     pipeline,
     review,
+    skills,
     tokenizer,
     training,
 )
@@ -89,8 +92,14 @@ def build_parser() -> argparse.ArgumentParser:
     # Register embedding commands
     embeddings.register_parsers(subparsers)
 
+    # Register MCP server commands
+    mcp.register_parsers(subparsers)
+
     # Register review commands
     review.register_parsers(subparsers)
+
+    # Register skill metadata commands
+    skills.register_parsers(subparsers)
 
     # Register Claude log analysis commands
     claude.register_parsers(subparsers)
@@ -116,11 +125,26 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Allow plugins to extend the CLI surface.
     try:
-        from ..plugins import call_plugin_hook, load_enabled_plugins
+        from ..plugins import (
+            call_plugin_hook,
+            load_enabled_extensions,
+            load_enabled_plugins,
+        )
 
         plugins = load_enabled_plugins()
         call_plugin_hook("register_cli", subparsers, plugins=plugins.values())
         call_plugin_hook("register_parsers", subparsers, plugins=plugins.values())
+
+        extensions = load_enabled_extensions()
+        for extension in extensions.values():
+            for module_name in extension.cli_modules:
+                try:
+                    module = importlib.import_module(module_name)
+                except Exception:
+                    continue
+                register = getattr(module, "register_parsers", None)
+                if callable(register):
+                    register(subparsers)
     except Exception:
         pass
 

@@ -14,6 +14,11 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+from .extensions import (
+    discover_extension_manifests as _discover_extension_manifests,
+    load_extensions as _load_extensions,
+    resolve_extensions_config,
+)
 from .schema import AFSConfig, PluginsConfig
 
 logger = logging.getLogger(__name__)
@@ -240,3 +245,35 @@ def call_plugin_hook(
                 name = getattr(module, "__name__", "unknown")
                 logger.warning("Plugin hook %s failed in %s: %s", hook, name, exc)
     return results
+
+
+def discover_extension_manifests(
+    config: AFSConfig | dict | None = None,
+    extra_paths: Iterable[Path] | None = None,
+) -> dict[str, Path]:
+    """Discover extension manifests resolved from config and env."""
+    paths = list(extra_paths or [])
+    return _discover_extension_manifests(config=config, extra_dirs=paths)
+
+
+def load_enabled_extensions(
+    config: AFSConfig | dict | None = None,
+    requested: Iterable[str] | None = None,
+    extra_paths: Iterable[Path] | None = None,
+) -> dict[str, Any]:
+    """Load enabled extension manifests."""
+    requested_names = list(requested or [])
+    paths = list(extra_paths or [])
+    return _load_extensions(config=config, requested=requested_names, extra_dirs=paths)
+
+
+__all__ = [
+    "call_plugin_hook",
+    "discover_plugins",
+    "discover_extension_manifests",
+    "load_plugins",
+    "load_enabled_plugins",
+    "load_enabled_extensions",
+    "resolve_plugins_config",
+    "resolve_extensions_config",
+]

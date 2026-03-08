@@ -52,6 +52,37 @@ def _expand_config_paths(config_data: dict[str, Any]) -> None:
             _expand_path(p) for p in config_data["plugins"]["plugin_dirs"]
         ]
 
+    if "extensions" in config_data and "extension_dirs" in config_data["extensions"]:
+        config_data["extensions"]["extension_dirs"] = [
+            _expand_path(p) for p in config_data["extensions"]["extension_dirs"]
+        ]
+
+    for profile_root_key in ("profiles", "profile"):
+        profile_root = config_data.get(profile_root_key)
+        if not isinstance(profile_root, dict):
+            continue
+        for profile_name, profile_data in profile_root.items():
+            if profile_name in {"active_profile", "auto_apply", "profiles"}:
+                continue
+            if not isinstance(profile_data, dict):
+                continue
+            for key in ("knowledge_mounts", "skill_roots", "model_registries"):
+                if key in profile_data and isinstance(profile_data[key], list):
+                    profile_data[key] = [
+                        _expand_path(p) for p in profile_data[key] if isinstance(p, (str, Path))
+                    ]
+
+        nested_profiles = profile_root.get("profiles")
+        if isinstance(nested_profiles, dict):
+            for _name, profile_data in nested_profiles.items():
+                if not isinstance(profile_data, dict):
+                    continue
+                for key in ("knowledge_mounts", "skill_roots", "model_registries"):
+                    if key in profile_data and isinstance(profile_data[key], list):
+                        profile_data[key] = [
+                            _expand_path(p) for p in profile_data[key] if isinstance(p, (str, Path))
+                        ]
+
     if "projects" in config_data:
         for project in config_data["projects"]:
             if "path" in project:

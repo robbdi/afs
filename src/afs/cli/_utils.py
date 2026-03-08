@@ -168,6 +168,11 @@ def ensure_context_root(root: Path) -> None:
 def write_config(path: Path, config: AFSConfig) -> None:
     """Write configuration to TOML file."""
     general = config.general
+
+    def _toml_array(values: list[str]) -> str:
+        escaped = [value.replace("\\", "\\\\").replace('"', '\\"') for value in values]
+        return "[" + ", ".join(f'"{value}"' for value in escaped) + "]"
+
     lines: list[str] = [
         "[general]",
         f"context_root = \"{general.context_root}\"",
@@ -181,6 +186,72 @@ def write_config(path: Path, config: AFSConfig) -> None:
             lines.append(f"path = \"{ws.path}\"")
             if ws.description:
                 lines.append(f"description = \"{ws.description}\"")
+
+    lines.append("")
+    lines.append("[plugins]")
+    lines.append(f"auto_discover = {str(config.plugins.auto_discover).lower()}")
+    lines.append(
+        "auto_discover_prefixes = "
+        + _toml_array(list(config.plugins.auto_discover_prefixes))
+    )
+    lines.append(
+        "enabled_plugins = " + _toml_array(list(config.plugins.enabled_plugins))
+    )
+    lines.append(
+        "plugin_dirs = " + _toml_array([str(path) for path in config.plugins.plugin_dirs])
+    )
+
+    lines.append("")
+    lines.append("[extensions]")
+    lines.append(f"auto_discover = {str(config.extensions.auto_discover).lower()}")
+    lines.append(
+        "enabled_extensions = "
+        + _toml_array(list(config.extensions.enabled_extensions))
+    )
+    lines.append(
+        "extension_dirs = "
+        + _toml_array([str(path) for path in config.extensions.extension_dirs])
+    )
+
+    lines.append("")
+    lines.append("[profiles]")
+    lines.append(f"active_profile = \"{config.profiles.active_profile}\"")
+    lines.append(f"auto_apply = {str(config.profiles.auto_apply).lower()}")
+    for name, profile in config.profiles.profiles.items():
+        lines.append("")
+        lines.append(f"[profiles.{name}]")
+        lines.append("inherits = " + _toml_array(profile.inherits))
+        lines.append(
+            "knowledge_mounts = "
+            + _toml_array([str(path) for path in profile.knowledge_mounts])
+        )
+        lines.append(
+            "skill_roots = " + _toml_array([str(path) for path in profile.skill_roots])
+        )
+        lines.append(
+            "model_registries = "
+            + _toml_array([str(path) for path in profile.model_registries])
+        )
+        lines.append(
+            "enabled_extensions = "
+            + _toml_array(list(profile.enabled_extensions))
+        )
+        lines.append("policies = " + _toml_array(list(profile.policies)))
+
+    lines.append("")
+    lines.append("[hooks]")
+    lines.append(
+        "before_context_read = "
+        + _toml_array(list(config.hooks.before_context_read))
+    )
+    lines.append(
+        "after_context_write = "
+        + _toml_array(list(config.hooks.after_context_write))
+    )
+    lines.append(
+        "before_agent_dispatch = "
+        + _toml_array(list(config.hooks.before_agent_dispatch))
+    )
 
     lines.append("")
     lines.append("[cognitive]")

@@ -182,6 +182,100 @@ class PluginsConfig:
         )
 
 
+def _as_path_list(items: list[Any] | None) -> list[Path]:
+    if not isinstance(items, list):
+        return []
+    return [_as_path(item) for item in items if isinstance(item, (str, Path))]
+
+
+def _as_str_list(items: list[Any] | None) -> list[str]:
+    if not isinstance(items, list):
+        return []
+    return [str(item) for item in items if isinstance(item, str)]
+
+
+@dataclass
+class ProfileConfig:
+    inherits: list[str] = field(default_factory=list)
+    knowledge_mounts: list[Path] = field(default_factory=list)
+    skill_roots: list[Path] = field(default_factory=list)
+    model_registries: list[Path] = field(default_factory=list)
+    enabled_extensions: list[str] = field(default_factory=list)
+    policies: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ProfileConfig:
+        return cls(
+            inherits=_as_str_list(data.get("inherits")),
+            knowledge_mounts=_as_path_list(data.get("knowledge_mounts")),
+            skill_roots=_as_path_list(data.get("skill_roots")),
+            model_registries=_as_path_list(data.get("model_registries")),
+            enabled_extensions=_as_str_list(data.get("enabled_extensions")),
+            policies=_as_str_list(data.get("policies")),
+        )
+
+
+@dataclass
+class ProfilesConfig:
+    active_profile: str = "default"
+    auto_apply: bool = True
+    profiles: dict[str, ProfileConfig] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ProfilesConfig:
+        active_profile = data.get("active_profile", cls().active_profile)
+        auto_apply = bool(data.get("auto_apply", cls().auto_apply))
+
+        profile_definitions = data.get("profiles")
+        if not isinstance(profile_definitions, dict):
+            profile_definitions = {
+                key: value
+                for key, value in data.items()
+                if key not in {"active_profile", "auto_apply"} and isinstance(value, dict)
+            }
+
+        parsed_profiles: dict[str, ProfileConfig] = {}
+        for name, payload in profile_definitions.items():
+            if isinstance(payload, dict):
+                parsed_profiles[str(name)] = ProfileConfig.from_dict(payload)
+
+        return cls(
+            active_profile=str(active_profile) if isinstance(active_profile, str) else cls().active_profile,
+            auto_apply=auto_apply,
+            profiles=parsed_profiles,
+        )
+
+
+@dataclass
+class ExtensionsConfig:
+    enabled_extensions: list[str] = field(default_factory=list)
+    extension_dirs: list[Path] = field(default_factory=list)
+    auto_discover: bool = True
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ExtensionsConfig:
+        return cls(
+            enabled_extensions=_as_str_list(data.get("enabled_extensions")),
+            extension_dirs=_as_path_list(data.get("extension_dirs")),
+            auto_discover=bool(data.get("auto_discover", True)),
+        )
+
+
+@dataclass
+class HooksConfig:
+    before_context_read: list[str] = field(default_factory=list)
+    after_context_write: list[str] = field(default_factory=list)
+    before_agent_dispatch: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> HooksConfig:
+        return cls(
+            before_context_read=_as_str_list(data.get("before_context_read")),
+            after_context_write=_as_str_list(data.get("after_context_write")),
+            before_agent_dispatch=_as_str_list(data.get("before_agent_dispatch")),
+        )
+
+
 @dataclass
 class AgentConfig:
     name: str
@@ -432,6 +526,9 @@ class CognitiveConfig:
 class AFSConfig:
     general: GeneralConfig = field(default_factory=GeneralConfig)
     plugins: PluginsConfig = field(default_factory=PluginsConfig)
+    extensions: ExtensionsConfig = field(default_factory=ExtensionsConfig)
+    profiles: ProfilesConfig = field(default_factory=ProfilesConfig)
+    hooks: HooksConfig = field(default_factory=HooksConfig)
     directories: list[DirectoryConfig] = field(default_factory=default_directory_configs)
     cognitive: CognitiveConfig = field(default_factory=CognitiveConfig)
     orchestrator: OrchestratorConfig = field(default_factory=OrchestratorConfig)
@@ -444,6 +541,12 @@ class AFSConfig:
         data = data or {}
         general = GeneralConfig.from_dict(data.get("general", {}))
         plugins = PluginsConfig.from_dict(data.get("plugins", {}))
+        extensions = ExtensionsConfig.from_dict(data.get("extensions", {}))
+        profiles_payload = data.get("profiles")
+        if not isinstance(profiles_payload, dict):
+            profiles_payload = data.get("profile", {})
+        profiles = ProfilesConfig.from_dict(profiles_payload)
+        hooks = HooksConfig.from_dict(data.get("hooks", {}))
         directories = _parse_directory_config(data)
         cognitive = CognitiveConfig.from_dict(data.get("cognitive", {}))
         orchestrator = OrchestratorConfig.from_dict(data.get("orchestrator", {}))
@@ -453,6 +556,9 @@ class AFSConfig:
         return cls(
             general=general,
             plugins=plugins,
+            extensions=extensions,
+            profiles=profiles,
+            hooks=hooks,
             directories=directories,
             cognitive=cognitive,
             orchestrator=orchestrator,

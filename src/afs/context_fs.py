@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from .grounding_hooks import run_grounding_hooks
 from .history import log_event
 from .manager import AFSManager
 from .models import MountType
@@ -98,6 +99,15 @@ class ContextFileSystem:
         allowed, message = self._policy.validate_operation(mount_type, "read")
         if not allowed:
             raise PermissionError(message)
+        run_grounding_hooks(
+            event="before_context_read",
+            payload={
+                "mount_type": mount_type.value,
+                "relative_path": relative_path,
+                "context_path": str(self._context_path),
+            },
+            config=self._manager.config,
+        )
         target, _root = self.resolve_path(mount_type, relative_path)
         if not target.exists():
             raise FileNotFoundError(f"Path not found: {target}")
@@ -141,6 +151,17 @@ class ContextFileSystem:
         mode = "a" if append else "w"
         with target.open(mode, encoding=encoding) as handle:
             handle.write(content)
+        run_grounding_hooks(
+            event="after_context_write",
+            payload={
+                "mount_type": mount_type.value,
+                "relative_path": relative_path,
+                "context_path": str(self._context_path),
+                "append": append,
+                "mkdirs": mkdirs,
+            },
+            config=self._manager.config,
+        )
         log_event(
             "fs",
             "afs.context_fs",

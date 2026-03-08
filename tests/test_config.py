@@ -42,3 +42,32 @@ def test_load_config_model_uses_explicit_path(tmp_path) -> None:
 
     model = load_config_model(config_path=config_path, merge_user=False)
     assert model.general.context_root == context_root.resolve()
+
+
+def test_load_config_model_parses_profiles_extensions_hooks(tmp_path) -> None:
+    config_path = tmp_path / "profiles.toml"
+    config_path.write_text(
+        "[extensions]\n"
+        "enabled_extensions = [\"afs_google\"]\n"
+        f"extension_dirs = [\"{tmp_path / 'extensions'}\"]\n\n"
+        "[profiles]\n"
+        "active_profile = \"work\"\n"
+        "auto_apply = true\n\n"
+        "[profiles.work]\n"
+        "knowledge_mounts = [\"~/Journal/logs\"]\n"
+        "skill_roots = [\"~/skills\"]\n"
+        "model_registries = [\"~/registry/chat_registry.toml\"]\n"
+        "enabled_extensions = [\"afs_google\"]\n"
+        "policies = [\"no_zelda\"]\n\n"
+        "[hooks]\n"
+        "before_context_read = [\"scripts/hooks/read.sh\"]\n",
+        encoding="utf-8",
+    )
+
+    model = load_config_model(config_path=config_path, merge_user=False)
+    assert model.extensions.enabled_extensions == ["afs_google"]
+    assert model.profiles.active_profile == "work"
+    assert "work" in model.profiles.profiles
+    work = model.profiles.profiles["work"]
+    assert work.policies == ["no_zelda"]
+    assert model.hooks.before_context_read == ["scripts/hooks/read.sh"]

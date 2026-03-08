@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from .config import load_config_model
+from .grounding_hooks import run_grounding_hooks
 from .schema import AgentConfig, OrchestratorConfig
 
 
@@ -25,13 +26,28 @@ class OrchestrationPlan:
 
 
 class Orchestrator:
-    def __init__(self, config: OrchestratorConfig | None = None) -> None:
-        self.config = config or load_config_model().orchestrator
+    def __init__(
+        self,
+        config: OrchestratorConfig | None = None,
+        full_config=None,
+    ) -> None:
+        self._full_config = full_config or load_config_model()
+        self.config = config or self._full_config.orchestrator
 
     def list_agents(self) -> list[AgentConfig]:
         return list(self.config.default_agents)
 
     def plan(self, request: TaskRequest) -> OrchestrationPlan:
+        run_grounding_hooks(
+            event="before_agent_dispatch",
+            payload={
+                "summary": request.summary,
+                "tags": request.tags,
+                "role": request.role,
+            },
+            config=self._full_config,
+        )
+
         if not self.config.enabled:
             return OrchestrationPlan(
                 summary=request.summary,

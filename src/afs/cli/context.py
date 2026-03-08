@@ -46,6 +46,7 @@ def context_init_command(args: argparse.Namespace) -> int:
         context_dir=context_dir,
         link_context=args.link_context,
         force=args.force,
+        profile=args.profile,
     )
     print(f"context_path: {context.path}")
     print(f"project: {context.project_name}")
@@ -64,6 +65,7 @@ def context_ensure_command(args: argparse.Namespace) -> int:
         context_root=context_root,
         context_dir=context_dir,
         link_context=args.link_context,
+        profile=args.profile,
     )
     print(f"context_path: {context.path}")
     print(f"project: {context.project_name}")
@@ -307,8 +309,94 @@ def context_ensure_all_command(args: argparse.Namespace) -> int:
         context = manager.ensure(
             path=project.path.parent,
             context_root=project.path,
+            profile=args.profile,
         )
         print(f"ensured: {context.project_name}\t{context.path}")
+    return 0
+
+
+def context_profile_show_command(args: argparse.Namespace) -> int:
+    """Show resolved profile details."""
+    from ..config import load_config_model
+    from ..profiles import resolve_active_profile
+
+    config_path = Path(args.config) if args.config else None
+    config = load_config_model(config_path=config_path, merge_user=True)
+    profile = resolve_active_profile(config, profile_name=args.profile)
+
+    payload = {
+        "profile": profile.name,
+        "extensions": profile.enabled_extensions,
+        "policies": profile.policies,
+        "knowledge_mounts": [str(path) for path in profile.knowledge_mounts],
+        "skill_roots": [str(path) for path in profile.skill_roots],
+        "model_registries": [str(path) for path in profile.model_registries],
+    }
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    extensions = ", ".join(payload["extensions"]) if payload["extensions"] else "(none)"
+    policies = ", ".join(payload["policies"]) if payload["policies"] else "(none)"
+    print(f"profile: {payload['profile']}")
+    print(f"extensions: {extensions}")
+    print(f"policies: {policies}")
+
+    print("knowledge_mounts:")
+    for entry in payload["knowledge_mounts"]:
+        print(f"- {entry}")
+    if not payload["knowledge_mounts"]:
+        print("- (none)")
+
+    print("skill_roots:")
+    for entry in payload["skill_roots"]:
+        print(f"- {entry}")
+    if not payload["skill_roots"]:
+        print("- (none)")
+
+    print("model_registries:")
+    for entry in payload["model_registries"]:
+        print(f"- {entry}")
+    if not payload["model_registries"]:
+        print("- (none)")
+    return 0
+
+
+def context_profile_apply_command(args: argparse.Namespace) -> int:
+    """Apply profile mounts to an existing context."""
+    from ..profiles import apply_profile_mounts, resolve_active_profile
+
+    config_path = Path(args.config) if args.config else None
+    manager = load_manager(config_path)
+    _project_path, context_path, _context_root, _context_dir = resolve_context_paths(
+        args, manager
+    )
+
+    profile = resolve_active_profile(manager.config, profile_name=args.profile)
+    result = apply_profile_mounts(manager, context_path, profile)
+
+    payload = {
+        "profile": result.profile_name,
+        "mounted": result.mounted,
+        "missing": result.skipped_missing,
+    }
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    print(f"profile: {result.profile_name}")
+    print(
+        "mounted: "
+        f"knowledge={result.mounted.get('knowledge', 0)} "
+        f"skills={result.mounted.get('skills', 0)} "
+        f"model_registries={result.mounted.get('model_registries', 0)}"
+    )
+    if result.skipped_missing:
+        print("missing:")
+        for path in result.skipped_missing:
+            print(f"- {path}")
     return 0
 
 
@@ -489,6 +577,7 @@ def register_parsers(subparsers: argparse._SubParsersAction) -> None:
         parser.add_argument("--path", help="Project path.")
         parser.add_argument("--context-root", help="Context root override.")
         parser.add_argument("--context-dir", help="Context directory name.")
+        parser.add_argument("--profile", help="Profile name override.")
 
     # context init
     ctx_init = context_sub.add_parser("init", help="Initialize context.")
@@ -556,7 +645,21 @@ def register_parsers(subparsers: argparse._SubParsersAction) -> None:
     ctx_ensure_all.add_argument("--max-depth", type=int, default=3, help="Max search depth.")
     ctx_ensure_all.add_argument("--ignore", action="append", help="Directories to ignore.")
     ctx_ensure_all.add_argument("--dry-run", action="store_true", help="Show what would be done.")
+    ctx_ensure_all.add_argument("--profile", help="Profile name override.")
     ctx_ensure_all.set_defaults(func=context_ensure_all_command)
+
+    # context profile-show
+    ctx_profile_show = context_sub.add_parser("profile-show", help="Show resolved profile.")
+    ctx_profile_show.add_argument("--config", help="Config path.")
+    ctx_profile_show.add_argument("--profile", help="Profile name override.")
+    ctx_profile_show.add_argument("--json", action="store_true", help="Output JSON.")
+    ctx_profile_show.set_defaults(func=context_profile_show_command)
+
+    # context profile-apply
+    ctx_profile_apply = context_sub.add_parser("profile-apply", help="Apply resolved profile mounts.")
+    add_context_args(ctx_profile_apply)
+    ctx_profile_apply.add_argument("--json", action="store_true", help="Output JSON.")
+    ctx_profile_apply.set_defaults(func=context_profile_apply_command)
 
     # context protect
     ctx_protect = context_sub.add_parser("protect", help="Protect a path (manual only).")

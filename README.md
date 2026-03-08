@@ -20,6 +20,29 @@ AFS is built on a modular architecture:
 - **Tools:** Scripts and executables that agents can invoke to perform actions.
 - **Context:** The structured file system where agents operate and store information.
 
+## Profiles and Extensions
+
+Core `afs` now supports profile-driven context injection via `afs.toml`.
+
+- Use `[profiles]` + `[profiles.<name>]` to control `knowledge_mounts`, `skill_roots`, and `model_registries`.
+- Use `[extensions]` + `extensions/*/extension.toml` to load external adapters (e.g. `afs_google`) without forking core files.
+- Use `[hooks]` (`before_context_read`, `after_context_write`, `before_agent_dispatch`) for grounding policies.
+
+Inspect and apply profiles:
+
+```bash
+afs context profile-show --profile work
+afs context profile-apply --profile work
+```
+
+Run the MCP server for Gemini/other MCP clients:
+
+```bash
+python -m afs.mcp_server
+# or
+afs mcp serve
+```
+
 ## Getting Started
 
 1.  **Installation:**
@@ -35,9 +58,23 @@ AFS is built on a modular architecture:
 3.  **Running Agents:**
     Use the CLI tools to interact with agents and manage context.
 
+## AFS Studio variants
+
+There are two "AFS Studio" implementations:
+
+- **Python TUI (this repo):** Run with `afs-studio` (shell function in `config/dotfiles/zsh/65-afs.zsh`) or `python -m afs studio run --build` from `lab/afs`. Best for development and context-heavy workflows.
+- **C++ ImGui (afs_suite):** Built from `lab/afs_suite/apps/studio/`. Launched via the unified `afs` CLI (`afs studio` or `afs launch afs_studio`) and from Barista (⌘⌥S). Defined in `shared/cpp/afs_core/resources/afs_apps.json`. Best for a standalone app with training dashboards.
+
+The unified CLI in `tools/afs/` uses the manifest for app launch; "studio" there always means the C++ app. Use the shell function `afs-studio` for the Python TUI.
+
+## lab/afs vs lab/afs-scawful
+
+- **lab/afs** — Core research prototype: orchestration, context mounts, Python CLI and TUI. Shared upstream-friendly code.
+- **lab/afs-scawful** — Personal fork: scripts (e.g. afs-studio wrappers, afs-warm), policies, agent instructions, chat registry. Overrides and machine-specific config live here; the AFS CLI and Barista can read from it for "my defaults."
+
 ## Documentation
 
-See the `docs/` directory for detailed guides and architectural overviews.
+See the `docs/` directory for detailed guides and architectural overviews. Workspace map: `~/src/docs/SOURCE_UNIVERSE_MAP.md`.
 
 ## License
 

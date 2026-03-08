@@ -13,6 +13,10 @@ from datetime import datetime
 from pathlib import Path
 
 
+EmbeddingFactory = Callable[..., Callable[[str], list[float]]]
+_EMBEDDING_BACKENDS: dict[str, EmbeddingFactory] = {}
+
+
 @dataclass
 class EmbeddingIndexResult:
     total_files: int = 0
@@ -70,6 +74,23 @@ class EmbeddingEvalResult:
         )
 
 
+def register_embedding_backend(name: str, factory: EmbeddingFactory) -> None:
+    """Register an embedding backend factory."""
+    normalized = name.strip().lower()
+    if not normalized:
+        raise ValueError("Backend name cannot be empty")
+    _EMBEDDING_BACKENDS[normalized] = factory
+
+
+def create_embed_fn(provider: str, **kwargs) -> Callable[[str], list[float]]:
+    """Create an embedding function from a registered backend."""
+    normalized = provider.strip().lower()
+    factory = _EMBEDDING_BACKENDS.get(normalized)
+    if not factory:
+        raise ValueError(f"Unknown embedding provider: {provider}")
+    return factory(**kwargs)
+
+
 def create_ollama_embed_fn(
     model: str = "nomic-embed-text",
     host: str = "http://localhost:11435",
@@ -88,6 +109,44 @@ def create_ollama_embed_fn(
         response.raise_for_status()
         data = response.json()
         embedding = data.get("embedding", [])
+        return [float(value) for value in embedding]
+
+    return embed
+
+
+def create_openai_embed_fn(
+    model: str,
+    *,
+    base_url: str = "https://api.openai.com/v1",
+    api_key: str | None = None,
+    timeout: float = 30.0,
+) -> Callable[[str], list[float]]:
+    """Create an OpenAI-compatible embeddings backend."""
+    try:
+        import httpx
+    except ImportError as exc:
+        raise RuntimeError("httpx not installed") from exc
+
+    resolved_api_key = api_key or os.getenv("OPENAI_API_KEY") or os.getenv("LITELLM_API_KEY")
+    if not resolved_api_key:
+        raise RuntimeError("Missing API key for OpenAI-compatible embeddings backend")
+
+    base = base_url.rstrip("/")
+    url = f"{base}/embeddings" if base.endswith("/v1") else f"{base}/v1/embeddings"
+
+    def embed(text: str) -> list[float]:
+        response = httpx.post(
+            url,
+            json={"model": model, "input": text},
+            headers={"Authorization": f"Bearer {resolved_api_key}"},
+            timeout=timeout,
+        )
+        response.raise_for_status()
+        data = response.json()
+        rows = data.get("data", [])
+        if not rows:
+            return []
+        embedding = rows[0].get("embedding", [])
         return [float(value) for value in embedding]
 
     return embed
@@ -608,3 +667,32 @@ def _resolve_hf_token(token: str | None) -> str | None:
     if token:
         return token
     return os.environ.get("HUGGINGFACE_HUB_TOKEN") or os.environ.get("HF_TOKEN")
+
+
+register_embedding_backend(
+    "ollama",
+    lambda model="nomic-embed-text", host="http://localhost:11435", **_: create_ollama_embed_fn(
+        model=model,
+        host=host,
+    ),
+)
+register_embedding_backend(
+    "hf",
+    lambda model, device=None, max_tokens=512, pooling="mean", normalize=True, token=None, **_: create_hf_embed_fn(
+        model=model,
+        device=device,
+        max_tokens=max_tokens,
+        pooling=pooling,
+        normalize=normalize,
+        token=token,
+    ),
+)
+register_embedding_backend(
+    "openai",
+    lambda model, base_url="https://api.openai.com/v1", api_key=None, timeout=30.0, **_: create_openai_embed_fn(
+        model=model,
+        base_url=base_url,
+        api_key=api_key,
+        timeout=timeout,
+    ),
+)

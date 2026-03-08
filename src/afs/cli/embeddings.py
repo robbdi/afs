@@ -10,8 +10,7 @@ from ..config import load_config_model
 from ..core import resolve_context_root
 from ..embeddings import (
     build_embedding_index,
-    create_hf_embed_fn,
-    create_ollama_embed_fn,
+    create_embed_fn,
     evaluate_embedding_index,
     load_embedding_eval_cases,
     search_embedding_index,
@@ -27,7 +26,8 @@ def embeddings_index_command(args: argparse.Namespace) -> int:
     except ValueError as exc:
         print(str(exc))
         return 1
-    sources = [Path(source).expanduser().resolve() for source in args.source]
+
+    sources = _resolve_sources(args, index_root)
     if not sources:
         print("No sources provided.")
         return 1
@@ -52,6 +52,7 @@ def embeddings_index_command(args: argparse.Namespace) -> int:
     if args.json:
         payload = {
             "index_root": str(index_root),
+            "sources": [str(path) for path in sources],
             "summary": result.summary(),
             "total_files": result.total_files,
             "indexed": result.indexed,
@@ -169,15 +170,16 @@ def embeddings_eval_command(args: argparse.Namespace) -> int:
             label = f"{status}"
             if rank:
                 label += f"@{rank}"
-            print(f"{label}\t{case.get('query')}")
+            print(f"{label}\t{case.get(query)}")
     return 0
 
 
 def _resolve_knowledge_root(args: argparse.Namespace, config) -> Path:
-    if args.knowledge_path:
-        return Path(args.knowledge_path).expanduser().resolve()
+    knowledge_path = args.knowledge_path or getattr(args, "knowledge_dir", None)
+    if knowledge_path:
+        return Path(knowledge_path).expanduser().resolve()
     if not args.project:
-        raise ValueError("Missing --project or --knowledge-path")
+        raise ValueError("Missing --project or --knowledge-path/--knowledge-dir")
     if args.context_root:
         context_root = Path(args.context_root).expanduser().resolve()
     else:
@@ -185,29 +187,40 @@ def _resolve_knowledge_root(args: argparse.Namespace, config) -> Path:
     return context_root / "knowledge" / args.project
 
 
+def _resolve_sources(args: argparse.Namespace, index_root: Path) -> list[Path]:
+    sources: list[Path] = []
+    raw_sources = args.source or []
+    for source in raw_sources:
+        sources.append(Path(source).expanduser().resolve())
+
+    if not sources and (args.knowledge_path or getattr(args, "knowledge_dir", None)):
+        sources.append(index_root)
+
+    return sources
+
+
 def _resolve_embed_fn(args: argparse.Namespace):
     if args.provider == "none":
         return None
+
+    kwargs: dict[str, object] = {"model": args.model}
+
     if args.provider == "ollama":
-        try:
-            return create_ollama_embed_fn(model=args.model, host=args.host)
-        except RuntimeError as exc:
-            print(str(exc))
-            return None
-    if args.provider == "hf":
-        try:
-            return create_hf_embed_fn(
-                model=args.model,
-                device=args.hf_device,
-                max_tokens=args.hf_max_tokens,
-                pooling=args.hf_pooling,
-                normalize=not args.hf_no_normalize,
-            )
-        except (RuntimeError, ValueError) as exc:
-            print(str(exc))
-            return None
-    print(f"Unknown provider: {args.provider}")
-    return None
+        kwargs["host"] = args.host
+    elif args.provider == "hf":
+        kwargs["device"] = args.hf_device
+        kwargs["max_tokens"] = args.hf_max_tokens
+        kwargs["pooling"] = args.hf_pooling
+        kwargs["normalize"] = not args.hf_no_normalize
+    elif args.provider == "openai":
+        kwargs["base_url"] = args.openai_base_url
+        kwargs["api_key"] = args.openai_api_key
+
+    try:
+        return create_embed_fn(args.provider, **kwargs)
+    except (RuntimeError, ValueError) as exc:
+        print(str(exc))
+        return None
 
 
 def register_parsers(subparsers: argparse._SubParsersAction) -> None:
@@ -217,16 +230,60 @@ def register_parsers(subparsers: argparse._SubParsersAction) -> None:
     )
     emb_sub = emb_parser.add_subparsers(dest="embeddings_command")
 
+    def add_provider_args(parser: argparse.ArgumentParser) -> None:
+        parser.add_argument(
+            "--provider",
+            choices=["none", "ollama", "hf", "openai"],
+            default="none",
+            help="Embedding provider.",
+        )
+        parser.add_argument(
+            "--model",
+            default="nomic-embed-text",
+            help="Embedding model (provider-specific).",
+        )
+        parser.add_argument(
+            "--host", default="http://localhost:11435", help="Ollama host."
+        )
+        parser.add_argument(
+            "--hf-device",
+            default="auto",
+            help="HF device (auto, cpu, cuda, mps).",
+        )
+        parser.add_argument(
+            "--hf-max-tokens",
+            type=int,
+            default=512,
+            help="HF max token length.",
+        )
+        parser.add_argument(
+            "--hf-pooling",
+            choices=["mean", "cls"],
+            default="mean",
+            help="HF pooling strategy.",
+        )
+        parser.add_argument(
+            "--hf-no-normalize",
+            action="store_true",
+            help="Disable L2 normalization for HF embeddings.",
+        )
+        parser.add_argument(
+            "--openai-base-url",
+            default="https://api.openai.com/v1",
+            help="OpenAI-compatible embeddings base URL.",
+        )
+        parser.add_argument("--openai-api-key", help="OpenAI-compatible API key override.")
+
     emb_index = emb_sub.add_parser("index", help="Build embedding index.")
     emb_index.add_argument("--config", help="Config path.")
     emb_index.add_argument("--project", help="Project name for knowledge index.")
     emb_index.add_argument("--knowledge-path", help="Knowledge base root override.")
+    emb_index.add_argument("--knowledge-dir", help="Alias for --knowledge-path.")
     emb_index.add_argument("--context-root", help="Context root override.")
     emb_index.add_argument(
         "--source",
         action="append",
-        required=True,
-        help="Source path to index (repeatable).",
+        help="Source path to index (repeatable). Defaults to knowledge dir.",
     )
     emb_index.add_argument(
         "--include",
@@ -246,42 +303,7 @@ def register_parsers(subparsers: argparse._SubParsersAction) -> None:
         "--embed-chars", type=int, default=2000, help="Embedding text length."
     )
     emb_index.add_argument("--max-bytes", type=int, default=2_000_000, help="Max bytes.")
-    emb_index.add_argument(
-        "--provider",
-        choices=["none", "ollama", "hf"],
-        default="none",
-        help="Embedding provider.",
-    )
-    emb_index.add_argument(
-        "--model",
-        default="nomic-embed-text",
-        help="Embedding model (Ollama name or HF id).",
-    )
-    emb_index.add_argument(
-        "--host", default="http://localhost:11435", help="Ollama host."
-    )
-    emb_index.add_argument(
-        "--hf-device",
-        default="auto",
-        help="HF device (auto, cpu, cuda, mps).",
-    )
-    emb_index.add_argument(
-        "--hf-max-tokens",
-        type=int,
-        default=512,
-        help="HF max token length.",
-    )
-    emb_index.add_argument(
-        "--hf-pooling",
-        choices=["mean", "cls"],
-        default="mean",
-        help="HF pooling strategy.",
-    )
-    emb_index.add_argument(
-        "--hf-no-normalize",
-        action="store_true",
-        help="Disable L2 normalization for HF embeddings.",
-    )
+    add_provider_args(emb_index)
     emb_index.add_argument(
         "--include-hidden", action="store_true", help="Include hidden files."
     )
@@ -292,46 +314,12 @@ def register_parsers(subparsers: argparse._SubParsersAction) -> None:
     emb_search.add_argument("--config", help="Config path.")
     emb_search.add_argument("--project", help="Project name for knowledge index.")
     emb_search.add_argument("--knowledge-path", help="Knowledge base root override.")
+    emb_search.add_argument("--knowledge-dir", help="Alias for --knowledge-path.")
     emb_search.add_argument("--context-root", help="Context root override.")
     emb_search.add_argument("query", help="Search query.")
     emb_search.add_argument("--top-k", type=int, default=5, help="Top results.")
     emb_search.add_argument("--min-score", type=float, default=0.3, help="Min score.")
-    emb_search.add_argument(
-        "--provider",
-        choices=["none", "ollama", "hf"],
-        default="none",
-        help="Embedding provider.",
-    )
-    emb_search.add_argument(
-        "--model",
-        default="nomic-embed-text",
-        help="Embedding model (Ollama name or HF id).",
-    )
-    emb_search.add_argument(
-        "--host", default="http://localhost:11435", help="Ollama host."
-    )
-    emb_search.add_argument(
-        "--hf-device",
-        default="auto",
-        help="HF device (auto, cpu, cuda, mps).",
-    )
-    emb_search.add_argument(
-        "--hf-max-tokens",
-        type=int,
-        default=512,
-        help="HF max token length.",
-    )
-    emb_search.add_argument(
-        "--hf-pooling",
-        choices=["mean", "cls"],
-        default="mean",
-        help="HF pooling strategy.",
-    )
-    emb_search.add_argument(
-        "--hf-no-normalize",
-        action="store_true",
-        help="Disable L2 normalization for HF embeddings.",
-    )
+    add_provider_args(emb_search)
     emb_search.add_argument("--preview", action="store_true", help="Show preview.")
     emb_search.add_argument("--json", action="store_true", help="Output JSON.")
     emb_search.set_defaults(func=embeddings_search_command)
@@ -340,6 +328,7 @@ def register_parsers(subparsers: argparse._SubParsersAction) -> None:
     emb_eval.add_argument("--config", help="Config path.")
     emb_eval.add_argument("--project", help="Project name for knowledge index.")
     emb_eval.add_argument("--knowledge-path", help="Knowledge base root override.")
+    emb_eval.add_argument("--knowledge-dir", help="Alias for --knowledge-path.")
     emb_eval.add_argument("--context-root", help="Context root override.")
     emb_eval.add_argument("--query-file", required=True, help="JSONL eval file.")
     emb_eval.add_argument("--top-k", type=int, default=5, help="Top results.")
@@ -350,42 +339,7 @@ def register_parsers(subparsers: argparse._SubParsersAction) -> None:
         default="any",
         help="Match mode for expected targets.",
     )
-    emb_eval.add_argument(
-        "--provider",
-        choices=["none", "ollama", "hf"],
-        default="none",
-        help="Embedding provider.",
-    )
-    emb_eval.add_argument(
-        "--model",
-        default="nomic-embed-text",
-        help="Embedding model (Ollama name or HF id).",
-    )
-    emb_eval.add_argument(
-        "--host", default="http://localhost:11435", help="Ollama host."
-    )
-    emb_eval.add_argument(
-        "--hf-device",
-        default="auto",
-        help="HF device (auto, cpu, cuda, mps).",
-    )
-    emb_eval.add_argument(
-        "--hf-max-tokens",
-        type=int,
-        default=512,
-        help="HF max token length.",
-    )
-    emb_eval.add_argument(
-        "--hf-pooling",
-        choices=["mean", "cls"],
-        default="mean",
-        help="HF pooling strategy.",
-    )
-    emb_eval.add_argument(
-        "--hf-no-normalize",
-        action="store_true",
-        help="Disable L2 normalization for HF embeddings.",
-    )
+    add_provider_args(emb_eval)
     emb_eval.add_argument(
         "--details", action="store_true", help="Include per-case details."
     )

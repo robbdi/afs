@@ -11,6 +11,7 @@ from .config import load_config_model
 from .history import log_event
 from .mapping import resolve_directory_map, resolve_directory_name
 from .models import ContextRoot, MountPoint, MountType, ProjectMetadata
+from .profiles import apply_profile_mounts, resolve_active_profile
 from .schema import AFSConfig, DirectoryConfig
 
 
@@ -69,6 +70,7 @@ class AFSManager:
         context_root: Path | None = None,
         context_dir: str | None = None,
         link_context: bool = False,
+        profile: str | None = None,
     ) -> ContextRoot:
         project_path = path.resolve()
         context_path = self.resolve_context_path(
@@ -80,6 +82,7 @@ class AFSManager:
         self._ensure_context_dirs(context_path)
         metadata = self._ensure_metadata(context_path, project_path)
         self._ensure_cognitive_scaffold(context_path)
+        self._apply_profile_mounts(context_path, profile)
         if link_context and context_root:
             link_path = project_path / (context_dir or self.CONTEXT_DIR_DEFAULT)
             self._ensure_link(link_path, context_path, force=False)
@@ -93,6 +96,7 @@ class AFSManager:
         context_dir: str | None = None,
         link_context: bool = False,
         force: bool = False,
+        profile: str | None = None,
     ) -> ContextRoot:
         project_path = path.resolve()
         context_path = self.resolve_context_path(
@@ -106,6 +110,7 @@ class AFSManager:
             self._ensure_context_dirs(context_path)
             metadata = self._ensure_metadata(context_path, project_path)
             self._ensure_cognitive_scaffold(context_path)
+            self._apply_profile_mounts(context_path, profile)
             self._ensure_link(link_path, context_path, force=force)
             return self.list_context(context_path=context_path, metadata=metadata)
 
@@ -117,6 +122,7 @@ class AFSManager:
         self._ensure_context_dirs(context_path)
         metadata = self._ensure_metadata(context_path, project_path)
         self._ensure_cognitive_scaffold(context_path)
+        self._apply_profile_mounts(context_path, profile)
         return self.list_context(context_path=context_path, metadata=metadata)
 
     def mount(
@@ -405,6 +411,26 @@ class AFSManager:
             epistemic_file = scratchpad_dir / self.EPISTEMIC_FILE
             if not epistemic_file.exists():
                 epistemic_file.write_text("{}\n", encoding="utf-8")
+
+    def _apply_profile_mounts(self, context_path: Path, profile_name: str | None) -> None:
+        if not self.config.profiles.auto_apply and not profile_name:
+            return
+
+        resolved_profile = resolve_active_profile(self.config, profile_name=profile_name)
+        result = apply_profile_mounts(self, context_path, resolved_profile)
+        log_event(
+            "context",
+            "afs.manager",
+            op="apply_profile",
+            metadata={
+                "profile": result.profile_name,
+                "context_path": str(context_path),
+                "mounted": result.mounted,
+                "missing": result.skipped_missing,
+                "policies": resolved_profile.policies,
+                "extensions": resolved_profile.enabled_extensions,
+            },
+        )
 
     def _ensure_link(self, link_path: Path, target: Path, force: bool) -> None:
         if link_path.is_symlink():
