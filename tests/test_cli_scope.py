@@ -32,6 +32,7 @@ def test_core_parser_excludes_legacy_model_command_groups(
     assert "skills" in commands
     assert "health" in commands
 
+    assert "claude" not in commands
     assert "training" not in commands
     assert "gateway" not in commands
     assert "benchmark" not in commands

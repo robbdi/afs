@@ -1,64 +1,18 @@
-"""Built-in AFS background agents."""
+"""Built-in AFS agents plus extension-provided agent registrations."""
 
 from __future__ import annotations
 
+import importlib
+import logging
+import sys
 from collections.abc import Callable, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 
-from .claude_orchestrator import (
-    AGENT_DESCRIPTION as CLAUDE_ORCHESTRATOR_DESCRIPTION,
-)
-from .claude_orchestrator import (
-    AGENT_NAME as CLAUDE_ORCHESTRATOR_NAME,
-)
-from .claude_orchestrator import (
-    main as claude_orchestrator_main,
-)
-from .context_audit import (
-    AGENT_DESCRIPTION as CONTEXT_AUDIT_DESCRIPTION,
-)
-from .context_audit import (
-    AGENT_NAME as CONTEXT_AUDIT_NAME,
-)
-from .context_audit import (
-    main as context_audit_main,
-)
-from .context_inventory import (
-    AGENT_DESCRIPTION as CONTEXT_INVENTORY_DESCRIPTION,
-)
-from .context_inventory import (
-    AGENT_NAME as CONTEXT_INVENTORY_NAME,
-)
-from .context_inventory import (
-    main as context_inventory_main,
-)
-from .context_warm import (
-    AGENT_DESCRIPTION as CONTEXT_WARM_DESCRIPTION,
-)
-from .context_warm import (
-    AGENT_NAME as CONTEXT_WARM_NAME,
-)
-from .context_warm import (
-    main as context_warm_main,
-)
-from .memory_export import (
-    AGENT_DESCRIPTION as MEMORY_EXPORT_DESCRIPTION,
-)
-from .memory_export import (
-    AGENT_NAME as MEMORY_EXPORT_NAME,
-)
-from .memory_export import (
-    main as memory_export_main,
-)
-from .scribe_draft import (
-    AGENT_DESCRIPTION as SCRIBE_DRAFT_DESCRIPTION,
-)
-from .scribe_draft import (
-    AGENT_NAME as SCRIBE_DRAFT_NAME,
-)
-from .scribe_draft import (
-    main as scribe_draft_main,
-)
+from ..plugins import load_enabled_extensions
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -68,46 +22,121 @@ class AgentSpec:
     entrypoint: Callable[[Sequence[str] | None], int]
 
 
-AGENTS: dict[str, AgentSpec] = {
-    CONTEXT_AUDIT_NAME: AgentSpec(
-        name=CONTEXT_AUDIT_NAME,
-        description=CONTEXT_AUDIT_DESCRIPTION,
-        entrypoint=context_audit_main,
-    ),
-    CONTEXT_INVENTORY_NAME: AgentSpec(
-        name=CONTEXT_INVENTORY_NAME,
-        description=CONTEXT_INVENTORY_DESCRIPTION,
-        entrypoint=context_inventory_main,
-    ),
-    MEMORY_EXPORT_NAME: AgentSpec(
-        name=MEMORY_EXPORT_NAME,
-        description=MEMORY_EXPORT_DESCRIPTION,
-        entrypoint=memory_export_main,
-    ),
-    SCRIBE_DRAFT_NAME: AgentSpec(
-        name=SCRIBE_DRAFT_NAME,
-        description=SCRIBE_DRAFT_DESCRIPTION,
-        entrypoint=scribe_draft_main,
-    ),
-    CONTEXT_WARM_NAME: AgentSpec(
-        name=CONTEXT_WARM_NAME,
-        description=CONTEXT_WARM_DESCRIPTION,
-        entrypoint=context_warm_main,
-    ),
-    CLAUDE_ORCHESTRATOR_NAME: AgentSpec(
-        name=CLAUDE_ORCHESTRATOR_NAME,
-        description=CLAUDE_ORCHESTRATOR_DESCRIPTION,
-        entrypoint=claude_orchestrator_main,
-    ),
-}
+CORE_AGENT_MODULES = (
+    "afs.agents.context_audit",
+    "afs.agents.context_inventory",
+    "afs.agents.context_warm",
+    "afs.agents.scribe_draft",
+)
+
+
+@contextmanager
+def _extension_import_path(extension_root: Path):
+    candidates = [str(extension_root), str(extension_root.parent)]
+    original = list(sys.path)
+    sys.path = [entry for entry in candidates if Path(entry).exists()] + original
+    try:
+        yield
+    finally:
+        sys.path = original
+
+
+def _load_agent_module(module_name: str) -> AgentSpec | None:
+    try:
+        module = importlib.import_module(module_name)
+    except Exception as exc:
+        logger.warning("Failed to import agent module %s: %s", module_name, exc)
+        return None
+
+    name = getattr(module, "AGENT_NAME", "")
+    description = getattr(module, "AGENT_DESCRIPTION", "")
+    entrypoint = getattr(module, "main", None)
+    if not isinstance(name, str) or not name.strip() or not callable(entrypoint):
+        logger.warning("Agent module %s is missing AGENT_NAME or main()", module_name)
+        return None
+    return AgentSpec(name=name.strip(), description=str(description or "").strip(), entrypoint=entrypoint)
+
+
+def _normalize_agent_specs(payload: object) -> list[AgentSpec]:
+    if payload is None:
+        return []
+    if isinstance(payload, AgentSpec):
+        return [payload]
+    if isinstance(payload, dict):
+        payloads = [payload]
+    elif isinstance(payload, (list, tuple)):
+        payloads = list(payload)
+    else:
+        raise TypeError("register_agents() must return AgentSpec, dict, or list")
+
+    specs: list[AgentSpec] = []
+    for item in payloads:
+        if isinstance(item, AgentSpec):
+            specs.append(item)
+            continue
+        if not isinstance(item, dict):
+            raise TypeError("agent payload must be dict or AgentSpec")
+        name = item.get("name")
+        entrypoint = item.get("entrypoint")
+        description = item.get("description", "")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("agent payload missing name")
+        if not callable(entrypoint):
+            raise ValueError(f"agent '{name}' missing callable entrypoint")
+        specs.append(
+            AgentSpec(
+                name=name.strip(),
+                description=str(description or "").strip(),
+                entrypoint=entrypoint,
+            )
+        )
+    return specs
+
+
+def _load_core_agents() -> dict[str, AgentSpec]:
+    loaded: dict[str, AgentSpec] = {}
+    for module_name in CORE_AGENT_MODULES:
+        spec = _load_agent_module(module_name)
+        if spec is not None:
+            loaded[spec.name] = spec
+    return loaded
+
+
+def _load_extension_agents() -> dict[str, AgentSpec]:
+    loaded: dict[str, AgentSpec] = {}
+    for extension in load_enabled_extensions().values():
+        for module_name in extension.agent_modules:
+            try:
+                with _extension_import_path(extension.root):
+                    module = importlib.import_module(module_name)
+            except Exception as exc:
+                logger.warning("Failed to import agent module %s: %s", module_name, exc)
+                continue
+            register = getattr(module, "register_agents", None)
+            if not callable(register):
+                continue
+            try:
+                specs = _normalize_agent_specs(register())
+            except Exception as exc:
+                logger.warning("Failed to register agents from %s: %s", module_name, exc)
+                continue
+            for spec in specs:
+                loaded[spec.name] = spec
+    return loaded
+
+
+def get_agent_registry() -> dict[str, AgentSpec]:
+    registry = _load_core_agents()
+    registry.update(_load_extension_agents())
+    return registry
 
 
 def list_agents() -> list[AgentSpec]:
-    return sorted(AGENTS.values(), key=lambda spec: spec.name)
+    return sorted(get_agent_registry().values(), key=lambda spec: spec.name)
 
 
 def get_agent(name: str) -> AgentSpec | None:
-    return AGENTS.get(name)
+    return get_agent_registry().get(name)
 
 
-__all__ = ["AgentSpec", "AGENTS", "list_agents", "get_agent"]
+__all__ = ["AgentSpec", "CORE_AGENT_MODULES", "get_agent_registry", "list_agents", "get_agent"]

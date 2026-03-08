@@ -55,9 +55,13 @@ Manifest fields:
 - `skill_roots`
 - `model_registries`
 - `cli_modules`
+- `agent_modules`
 - `policies`
 - `[hooks]`
 - `[mcp_tools]`
+
+`agent_modules` let an extension register extra `afs agents run ...` entries without
+putting personal or domain-specific agent code into core `afs`.
 
 `[mcp_tools]` example:
 

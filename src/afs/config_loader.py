@@ -1,10 +1,10 @@
-"""
-Configuration loader for AFS.
-Handles loading TOML configuration with fallback for standard library support.
-"""
+"""Compatibility helpers for loading TOML and chat registries."""
+
 import sys
 from pathlib import Path
 from typing import Any
+
+from .chat_registry import load_chat_registry
 
 try:
     if sys.version_info >= (3, 11):
@@ -28,21 +28,8 @@ def load_toml(path: Path) -> dict[str, Any]:
             # Very basic fallback or error
             raise ImportError("Python 3.11+ or 'tomli' package required to parse TOML configuration.")
 
-def get_chat_registry(root_path: Path = None) -> dict[str, Any]:
-    """Load the chat registry configuration."""
-    if root_path is None:
-        # Try to find from common locations relative to this file
-        # src/afs/config_loader.py -> ... -> src/lab/afs-scawful/config/chat_registry.toml
-        # This assumes standard layout
-        current_file = Path(__file__).resolve()
-        # Navigate up to find 'src'
-        src_root = current_file.parent.parent.parent.parent
-        config_path = src_root / "lab" / "afs-scawful" / "config" / "chat_registry.toml"
-    else:
-        config_path = root_path
-
-    if not config_path.exists():
-         # Fallback absolute path for scawful user
-        config_path = Path("/Users/scawful/src/lab/afs-scawful/config/chat_registry.toml")
-
-    return load_toml(config_path)
+def get_chat_registry(root_path: Path | None = None) -> dict[str, Any]:
+    """Load chat registry data from explicit paths or active profile registries."""
+    if root_path is not None:
+        return load_chat_registry(registry_paths=[root_path]).to_dict()
+    return load_chat_registry().to_dict()

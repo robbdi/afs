@@ -17,7 +17,6 @@ from pathlib import Path
 from ..health import cli as health_cli
 from ..history import log_cli_invocation
 from . import (
-    claude,
     context,
     core,
     embeddings,
@@ -72,9 +71,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Register skill metadata commands
     skills.register_parsers(subparsers)
-
-    # Register Claude log analysis commands
-    claude.register_parsers(subparsers)
 
     # Register health commands
     health_cli.register_parsers(subparsers)

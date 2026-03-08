@@ -84,7 +84,7 @@ def render_default_help(parser: argparse.ArgumentParser, config: AFSConfig | Non
             [
                 f"{_tag('fs', '32')} context roots, mounts, workspaces, graph",
                 f"{_tag('ops', '34')} init/status/plugins/services/agents/orchestrator",
-                f"{_tag('agent', '35')} embeddings/mcp/profile/skills/health/claude",
+                f"{_tag('agent', '35')} embeddings/mcp/profile/skills/health",
                 f"{_tag('studio', '36')} studio build/install/path/alias",
             ]
         )
@@ -95,7 +95,7 @@ def render_default_help(parser: argparse.ArgumentParser, config: AFSConfig | Non
     lines.extend(
         _format_list(
             [
-                "Legacy model-training, benchmark, and gateway commands are extension-owned.",
+                "Legacy personal/model-training, benchmark, gateway, and Claude commands are extension-owned.",
                 "Enable an extension such as afs-scawful to restore personal/domain command groups.",
             ]
         )

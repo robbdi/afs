@@ -47,6 +47,10 @@ before_agent_dispatch = []
 `context init` and `context ensure` auto-apply the active profile when
 `profiles.auto_apply = true`.
 
+`model_registries` are consumed by registry-aware runtime surfaces such as
+`afs agents run scribe-draft` and any extension-provided agent or gateway entrypoints
+that call the shared chat registry loader.
+
 ## Skill Frontmatter
 
 `SKILL.md` files can include YAML frontmatter for filtering and auto-loading:

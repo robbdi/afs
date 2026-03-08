@@ -25,6 +25,7 @@ class ExtensionManifest:
     skill_roots: list[Path] = field(default_factory=list)
     model_registries: list[Path] = field(default_factory=list)
     cli_modules: list[str] = field(default_factory=list)
+    agent_modules: list[str] = field(default_factory=list)
     policies: list[str] = field(default_factory=list)
     hooks: dict[str, list[str]] = field(default_factory=dict)
     mcp_tools_module: str = ""
@@ -223,6 +224,7 @@ def load_extension_manifest(path: Path) -> ExtensionManifest:
         skill_roots=skill_roots,
         model_registries=model_registries,
         cli_modules=_as_str_list(raw.get("cli_modules")),
+        agent_modules=_as_str_list(raw.get("agent_modules")),
         policies=_as_str_list(raw.get("policies")),
         hooks=hooks,
         mcp_tools_module=mcp_tools_module,
