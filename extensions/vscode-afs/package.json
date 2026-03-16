@@ -1,0 +1,182 @@
+{
+  "name": "afs-vscode",
+  "displayName": "AFS - Agentic File System",
+  "description": "Context management and visualization for the Agentic File System",
+  "version": "0.1.0",
+  "publisher": "scawful",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/scawful/afs"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "workspaceContains:**/.context/metadata.json",
+    "onView:afs.contextExplorer"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "afs-explorer",
+          "title": "AFS Context",
+          "icon": "media/icons/afs-logo.svg"
+        }
+      ]
+    },
+    "views": {
+      "afs-explorer": [
+        {
+          "id": "afs.contextExplorer",
+          "name": "Contexts",
+          "contextualTitle": "AFS Context Explorer"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "afs.contextExplorer",
+        "contents": "No AFS contexts found.\n[Initialize Context](command:afs.context.init)\n[Discover Contexts](command:afs.context.discover)",
+        "when": "!afs.active"
+      }
+    ],
+    "commands": [
+      { "command": "afs.context.init", "title": "AFS: Initialize Context", "category": "AFS" },
+      { "command": "afs.context.discover", "title": "AFS: Discover Contexts", "category": "AFS" },
+      { "command": "afs.context.mount", "title": "AFS: Mount Source", "category": "AFS" },
+      { "command": "afs.context.unmount", "title": "AFS: Unmount Source", "category": "AFS" },
+      { "command": "afs.index.rebuild", "title": "AFS: Rebuild Context Index", "category": "AFS" },
+      { "command": "afs.index.query", "title": "AFS: Query Context Index", "category": "AFS" },
+      { "command": "afs.index.queryQuickOpen", "title": "AFS: Quick Open Context File", "category": "AFS" },
+      { "command": "afs.mcp.register", "title": "AFS: Register MCP Server", "category": "AFS" },
+      { "command": "afs.mcp.unregister", "title": "AFS: Unregister MCP Server", "category": "AFS" },
+      { "command": "afs.mcp.status", "title": "AFS: MCP Status", "category": "AFS" },
+      { "command": "afs.server.restart", "title": "AFS: Restart Server", "category": "AFS" },
+      { "command": "afs.server.showLogs", "title": "AFS: Show Server Logs", "category": "AFS" },
+      { "command": "afs.treeView.refresh", "title": "AFS: Refresh Context Explorer", "icon": "$(refresh)", "category": "AFS" }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "afs.treeView.refresh", "when": "view == afs.contextExplorer", "group": "navigation" }
+      ],
+      "view/item/context": [
+        { "command": "afs.context.mount", "when": "view == afs.contextExplorer && viewItem == contextRoot" },
+        { "command": "afs.context.unmount", "when": "view == afs.contextExplorer && viewItem == mountPoint" },
+        { "command": "afs.index.rebuild", "when": "view == afs.contextExplorer && viewItem == contextRoot" }
+      ],
+      "explorer/context": [
+        { "command": "afs.context.init", "when": "explorerResourceIsFolder", "group": "afs@1" }
+      ]
+    },
+    "configuration": {
+      "title": "AFS - Agentic File System",
+      "properties": {
+        "afs.server.mode": {
+          "type": "string",
+          "enum": ["mcp", "cli", "auto"],
+          "default": "auto",
+          "description": "Transport mode: 'mcp' spawns MCP stdio server, 'cli' uses CLI commands, 'auto' tries MCP first."
+        },
+        "afs.server.command": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the AFS CLI binary. If empty, auto-detection is used."
+        },
+        "afs.server.pythonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the Python interpreter for AFS. If empty, uses workspace .venv or system python3."
+        },
+        "afs.server.args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Additional arguments for the MCP server."
+        },
+        "afs.server.env": {
+          "type": "object",
+          "default": {},
+          "description": "Additional environment variables for the AFS server process."
+        },
+        "afs.server.timeout": {
+          "type": "number",
+          "default": 30000,
+          "description": "Timeout in milliseconds for MCP requests."
+        },
+        "afs.discovery.searchPaths": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Additional paths for context discovery."
+        },
+        "afs.discovery.maxDepth": {
+          "type": "number",
+          "default": 3,
+          "description": "Maximum directory depth for context discovery."
+        },
+        "afs.discovery.autoDiscover": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto-discover contexts on activation."
+        },
+        "afs.index.autoRebuild": {
+          "type": "boolean",
+          "default": false,
+          "description": "Auto-rebuild index when .context files change."
+        },
+        "afs.mcp.autoRegister": {
+          "type": "boolean",
+          "default": false,
+          "description": "Auto-register AFS in editor MCP config on activation. (Not recommended — use afs.mcp.register command instead.)"
+        },
+        "afs.mcp.configPath": {
+          "type": "string",
+          "default": "",
+          "description": "Override path for editor MCP config file."
+        },
+        "afs.treeView.showEmptyMounts": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show mount types with no entries."
+        },
+        "afs.statusBar.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show AFS status in the status bar."
+        },
+        "afs.logging.level": {
+          "type": "string",
+          "enum": ["off", "error", "warn", "info", "debug", "trace"],
+          "default": "info",
+          "description": "Log level for the AFS output channel."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "lint": "eslint src --ext ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node esbuild.test.mjs && node --test dist-test/suite/**/*.test.js",
+    "package": "npx @vscode/vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.0",
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "@vscode/test-electron": "^2.3.0",
+    "@vscode/vsce": "^2.22.0",
+    "esbuild": "^0.19.0",
+    "glob": "^10.3.0",
+    "eslint": "^8.50.0",
+    "mocha": "^10.2.0",
+    "typescript": "^5.3.0"
+  }
+}
