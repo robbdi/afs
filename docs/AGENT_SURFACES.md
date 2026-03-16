@@ -95,9 +95,15 @@ Built-in tools:
 
 - `fs.read`
 - `fs.write`
+- `fs.delete`
+- `fs.move`
 - `fs.list`
 - `context.discover`
+- `context.init`
 - `context.mount`
+- `context.unmount`
+- `context.index.rebuild`
+- `context.query`
 
 Paths are scoped to:
 

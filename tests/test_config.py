@@ -71,3 +71,27 @@ def test_load_config_model_parses_profiles_extensions_hooks(tmp_path) -> None:
     work = model.profiles.profiles["work"]
     assert work.policies == ["no_zelda"]
     assert model.hooks.before_context_read == ["scripts/hooks/read.sh"]
+
+
+def test_load_config_model_parses_context_index_settings(tmp_path) -> None:
+    config_path = tmp_path / "index.toml"
+    config_path.write_text(
+        "[context_index]\n"
+        "enabled = true\n"
+        "db_filename = \"sqlite/context.db\"\n"
+        "auto_index = false\n"
+        "auto_refresh = false\n"
+        "include_content = false\n"
+        "max_file_size_bytes = 8192\n"
+        "max_content_chars = 1024\n",
+        encoding="utf-8",
+    )
+
+    model = load_config_model(config_path=config_path, merge_user=False)
+    assert model.context_index.enabled is True
+    assert model.context_index.db_filename == "sqlite/context.db"
+    assert model.context_index.auto_index is False
+    assert model.context_index.auto_refresh is False
+    assert model.context_index.include_content is False
+    assert model.context_index.max_file_size_bytes == 8192
+    assert model.context_index.max_content_chars == 1024

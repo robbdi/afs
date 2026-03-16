@@ -170,6 +170,7 @@ class AFSManager:
                 "destination": str(destination),
             },
         )
+        self._sync_context_index_mount(context_path, mount_type)
         return MountPoint(
             name=alias,
             source=source,
@@ -206,6 +207,7 @@ class AFSManager:
                     "mount_path": str(mount_path),
                 },
             )
+            self._sync_context_index_mount(context_path, mount_type)
             return True
         return False
 
@@ -336,6 +338,25 @@ class AFSManager:
             keep = subdir / ".keep"
             if not keep.exists():
                 keep.touch()
+
+    def _sync_context_index_mount(self, context_path: Path, mount_type: MountType) -> None:
+        try:
+            settings = self.config.context_index
+            if not settings.enabled:
+                return
+
+            from .context_index import ContextSQLiteIndex
+
+            index = ContextSQLiteIndex(self, context_path)
+            index.rebuild(
+                mount_types=[mount_type],
+                include_content=settings.include_content,
+                max_file_size_bytes=settings.max_file_size_bytes,
+                max_content_chars=settings.max_content_chars,
+            )
+        except Exception:
+            # Mount operations should still succeed even if indexing fails.
+            return
 
     def _ensure_metadata(self, context_path: Path, project_path: Path) -> ProjectMetadata:
         metadata_path = context_path / self.METADATA_FILE

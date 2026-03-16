@@ -528,6 +528,40 @@ class CognitiveConfig:
 
 
 @dataclass
+class ContextIndexConfig:
+    enabled: bool = True
+    db_filename: str = "context_index.sqlite3"
+    auto_index: bool = True
+    auto_refresh: bool = True
+    include_content: bool = True
+    max_file_size_bytes: int = 256 * 1024
+    max_content_chars: int = 12000
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ContextIndexConfig:
+        max_file_size_bytes = data.get("max_file_size_bytes", cls().max_file_size_bytes)
+        max_content_chars = data.get("max_content_chars", cls().max_content_chars)
+        db_filename = data.get("db_filename", cls().db_filename)
+
+        if not isinstance(max_file_size_bytes, int) or max_file_size_bytes < 1024:
+            max_file_size_bytes = cls().max_file_size_bytes
+        if not isinstance(max_content_chars, int) or max_content_chars < 0:
+            max_content_chars = cls().max_content_chars
+        if not isinstance(db_filename, str) or not db_filename.strip():
+            db_filename = cls().db_filename
+
+        return cls(
+            enabled=bool(data.get("enabled", True)),
+            db_filename=db_filename.strip(),
+            auto_index=bool(data.get("auto_index", True)),
+            auto_refresh=bool(data.get("auto_refresh", True)),
+            include_content=bool(data.get("include_content", True)),
+            max_file_size_bytes=max_file_size_bytes,
+            max_content_chars=max_content_chars,
+        )
+
+
+@dataclass
 class AFSConfig:
     general: GeneralConfig = field(default_factory=GeneralConfig)
     plugins: PluginsConfig = field(default_factory=PluginsConfig)
@@ -540,6 +574,7 @@ class AFSConfig:
     services: ServicesConfig = field(default_factory=ServicesConfig)
     history: HistoryConfig = field(default_factory=HistoryConfig)
     memory_export: MemoryExportConfig = field(default_factory=MemoryExportConfig)
+    context_index: ContextIndexConfig = field(default_factory=ContextIndexConfig)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> AFSConfig:
@@ -558,6 +593,7 @@ class AFSConfig:
         services = ServicesConfig.from_dict(data.get("services", {}))
         history = HistoryConfig.from_dict(data.get("history", {}))
         memory_export = MemoryExportConfig.from_dict(data.get("memory_export", {}))
+        context_index = ContextIndexConfig.from_dict(data.get("context_index", {}))
         return cls(
             general=general,
             plugins=plugins,
@@ -570,6 +606,7 @@ class AFSConfig:
             services=services,
             history=history,
             memory_export=memory_export,
+            context_index=context_index,
         )
 
 

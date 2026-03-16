@@ -116,6 +116,42 @@ jobs:
         name: documentation
         path: docs/_build/html/
 
+  vscode-extension-guard:
+    name: VSCode Extension Guard
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Validate extension scripts
+      run: |
+        if [ ! -f extensions/vscode-afs/package.json ]; then
+          echo "No extensions/vscode-afs package yet; skipping guard."
+          exit 0
+        fi
+        node -e "const pkg=require('./extensions/vscode-afs/package.json'); const required=['lint','test']; const missing=required.filter((name)=>!pkg.scripts||!pkg.scripts[name]); if(missing.length){console.error('Missing required npm scripts: '+missing.join(', ')); process.exit(1)}"
+
+    - name: Run extension lint and tests
+      run: |
+        if [ ! -f extensions/vscode-afs/package.json ]; then
+          echo "No extensions/vscode-afs package yet; skipping guard."
+          exit 0
+        fi
+        cd extensions/vscode-afs
+        if [ -f package-lock.json ]; then
+          npm ci
+        else
+          npm install --no-audit --no-fund
+        fi
+        npm run lint
+        npm run typecheck --if-present
+        npm run test
+
   model-eval:
     name: Model Evaluation
     runs-on: ubuntu-latest

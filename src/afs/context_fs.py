@@ -12,8 +12,8 @@ from pathlib import Path
 from .grounding_hooks import run_grounding_hooks
 from .history import log_event
 from .manager import AFSManager
-from .monorepo_bridge import get_workspace_bridge_status
 from .models import MountType
+from .monorepo_bridge import get_workspace_bridge_status
 from .policy import PolicyEnforcer
 
 logger = logging.getLogger(__name__)
@@ -207,7 +207,27 @@ class ContextFileSystem:
             },
             payload={"content": content},
         )
+        self._sync_index_for_write(mount_type, relative_path)
         return target
+
+    def _sync_index_for_write(self, mount_type: MountType, relative_path: str) -> None:
+        try:
+            settings = self._manager.config.context_index
+            if not settings.enabled:
+                return
+
+            from .context_index import ContextSQLiteIndex
+
+            index = ContextSQLiteIndex(self._manager, self._context_path)
+            index.upsert_relative_path(
+                mount_type,
+                relative_path,
+                include_content=settings.include_content,
+                max_file_size_bytes=settings.max_file_size_bytes,
+                max_content_chars=settings.max_content_chars,
+            )
+        except Exception as exc:  # pragma: no cover - non-critical path
+            logger.debug("Context index sync skipped for %s: %s", relative_path, exc)
 
     def stat_entry(
         self,

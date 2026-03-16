@@ -46,6 +46,19 @@ Run the MCP server for Gemini/other MCP clients:
 afs mcp serve
 ```
 
+Tune context index defaults in `afs.toml`:
+
+```toml
+[context_index]
+enabled = true
+db_filename = "context_index.sqlite3"
+auto_index = true
+auto_refresh = true
+include_content = true
+max_file_size_bytes = 262144
+max_content_chars = 12000
+```
+
 ## Getting Started
 
 1.  **Installation:**

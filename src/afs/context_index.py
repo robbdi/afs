@@ -1,0 +1,865 @@
+"""SQLite-backed context indexing and query helpers."""
+
+from __future__ import annotations
+
+import hashlib
+import re
+import sqlite3
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from .manager import AFSManager
+from .models import MountType
+
+DEFAULT_DB_FILENAME = "context_index.sqlite3"
+DEFAULT_MAX_FILE_SIZE_BYTES = 256 * 1024
+DEFAULT_MAX_CONTENT_CHARS = 12000
+
+_TEXT_SUFFIXES = {
+    ".asm",
+    ".bash",
+    ".c",
+    ".cc",
+    ".cfg",
+    ".conf",
+    ".cpp",
+    ".css",
+    ".csv",
+    ".h",
+    ".html",
+    ".inc",
+    ".ini",
+    ".java",
+    ".js",
+    ".json",
+    ".lua",
+    ".md",
+    ".ps1",
+    ".py",
+    ".rs",
+    ".s",
+    ".sh",
+    ".sql",
+    ".toml",
+    ".ts",
+    ".tsx",
+    ".txt",
+    ".xml",
+    ".yaml",
+    ".yml",
+    ".zsh",
+    ".65c",
+    ".65s",
+}
+
+
+@dataclass
+class IndexSummary:
+    context_path: str
+    db_path: str
+    indexed_at: str
+    rows_written: int
+    rows_deleted: int
+    by_mount_type: dict[str, int]
+    skipped_large_files: int
+    skipped_binary_files: int
+    errors: list[str]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "context_path": self.context_path,
+            "db_path": self.db_path,
+            "indexed_at": self.indexed_at,
+            "rows_written": self.rows_written,
+            "rows_deleted": self.rows_deleted,
+            "by_mount_type": dict(self.by_mount_type),
+            "skipped_large_files": self.skipped_large_files,
+            "skipped_binary_files": self.skipped_binary_files,
+            "errors": list(self.errors),
+        }
+
+
+class ContextSQLiteIndex:
+    """Persistent SQLite index of context mount entries."""
+
+    def __init__(
+        self,
+        manager: AFSManager,
+        context_path: Path,
+        *,
+        db_path: Path | None = None,
+    ) -> None:
+        self._manager = manager
+        self._context_path = context_path.expanduser().resolve()
+        self._db_path = db_path.expanduser().resolve() if db_path else self._default_db_path()
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._fts_enabled = False
+        self._initialize()
+
+    @property
+    def context_path(self) -> Path:
+        return self._context_path
+
+    @property
+    def db_path(self) -> Path:
+        return self._db_path
+
+    def rebuild(
+        self,
+        *,
+        mount_types: list[MountType] | None = None,
+        include_content: bool = True,
+        max_file_size_bytes: int = DEFAULT_MAX_FILE_SIZE_BYTES,
+        max_content_chars: int = DEFAULT_MAX_CONTENT_CHARS,
+    ) -> IndexSummary:
+        selected_mounts = self._normalize_mount_types(mount_types)
+        indexed_at = datetime.now(timezone.utc).isoformat()
+        rows: list[tuple[Any, ...]] = []
+        by_mount_type: dict[str, int] = {mount_type.value: 0 for mount_type in selected_mounts}
+        errors: list[str] = []
+        skipped_large_files = 0
+        skipped_binary_files = 0
+
+        for mount_type in selected_mounts:
+            try:
+                mount_root = self._manager.resolve_mount_root(self._context_path, mount_type)
+            except Exception as exc:  # pragma: no cover - defensive
+                errors.append(f"{mount_type.value}: resolve failed: {exc}")
+                continue
+
+            if not mount_root.exists():
+                continue
+
+            for entry, relative_path in _iter_mount_entries(mount_root):
+                try:
+                    row, reason = self._build_row(
+                        mount_type,
+                        relative_path=relative_path,
+                        entry=entry,
+                        include_content=include_content,
+                        max_file_size_bytes=max_file_size_bytes,
+                        max_content_chars=max_content_chars,
+                        indexed_at=indexed_at,
+                    )
+                except OSError as exc:
+                    errors.append(f"{mount_type.value}: stat failed for {entry}: {exc}")
+                    continue
+
+                if reason == "too_large":
+                    skipped_large_files += 1
+                elif reason == "binary":
+                    skipped_binary_files += 1
+
+                rows.append(row)
+                by_mount_type[mount_type.value] = by_mount_type.get(mount_type.value, 0) + 1
+
+        rows_deleted = self._delete_rows_for_mounts(selected_mounts)
+        if rows:
+            with self._connect() as connection:
+                connection.executemany(
+                    """
+                    INSERT INTO file_index (
+                        context_path,
+                        mount_type,
+                        relative_path,
+                        absolute_path,
+                        is_dir,
+                        size_bytes,
+                        modified_at,
+                        content_text,
+                        content_hash,
+                        indexed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    rows,
+                )
+                connection.commit()
+
+        return IndexSummary(
+            context_path=str(self._context_path),
+            db_path=str(self._db_path),
+            indexed_at=indexed_at,
+            rows_written=len(rows),
+            rows_deleted=rows_deleted,
+            by_mount_type=by_mount_type,
+            skipped_large_files=skipped_large_files,
+            skipped_binary_files=skipped_binary_files,
+            errors=errors,
+        )
+
+    def upsert_relative_path(
+        self,
+        mount_type: MountType,
+        relative_path: str,
+        *,
+        include_content: bool = True,
+        max_file_size_bytes: int = DEFAULT_MAX_FILE_SIZE_BYTES,
+        max_content_chars: int = DEFAULT_MAX_CONTENT_CHARS,
+    ) -> bool:
+        normalized = _normalize_relative_path(relative_path)
+        if not normalized:
+            return False
+
+        mount_root = self._manager.resolve_mount_root(self._context_path, mount_type)
+        entry = mount_root / normalized
+        if not entry.exists():
+            self.delete_relative_path(mount_type, normalized)
+            return False
+
+        indexed_at = datetime.now(timezone.utc).isoformat()
+        row, _reason = self._build_row(
+            mount_type,
+            relative_path=normalized,
+            entry=entry,
+            include_content=include_content,
+            max_file_size_bytes=max_file_size_bytes,
+            max_content_chars=max_content_chars,
+            indexed_at=indexed_at,
+        )
+
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO file_index (
+                    context_path,
+                    mount_type,
+                    relative_path,
+                    absolute_path,
+                    is_dir,
+                    size_bytes,
+                    modified_at,
+                    content_text,
+                    content_hash,
+                    indexed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                row,
+            )
+            connection.commit()
+        return True
+
+    def delete_relative_path(self, mount_type: MountType, relative_path: str) -> int:
+        normalized = _normalize_relative_path(relative_path)
+        if not normalized:
+            return 0
+
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                DELETE FROM file_index
+                WHERE context_path = ?
+                  AND mount_type = ?
+                  AND relative_path = ?
+                """,
+                (str(self._context_path), mount_type.value, normalized),
+            )
+            connection.commit()
+            if cursor.rowcount is None or cursor.rowcount < 0:
+                return 0
+            return int(cursor.rowcount)
+
+    def infer_relative_for_absolute_path(
+        self, absolute_path: Path
+    ) -> tuple[MountType, str] | None:
+        candidate = absolute_path.expanduser().resolve()
+        for mount_type in MountType:
+            try:
+                mount_root = self._manager.resolve_mount_root(self._context_path, mount_type)
+            except Exception:
+                continue
+            if not mount_root.exists():
+                continue
+
+            mount_root_resolved = mount_root.resolve()
+            try:
+                rel = candidate.relative_to(mount_root_resolved).as_posix()
+                if rel and rel != ".":
+                    return mount_type, rel
+            except ValueError:
+                pass
+
+            try:
+                children = mount_root.iterdir()
+            except OSError:
+                continue
+            for child in children:
+                if not child.is_symlink():
+                    continue
+                try:
+                    target = child.resolve()
+                except OSError:
+                    continue
+                if not target.exists():
+                    continue
+                if candidate == target:
+                    return mount_type, child.name
+                try:
+                    sub = candidate.relative_to(target).as_posix()
+                except ValueError:
+                    continue
+                if not sub or sub == ".":
+                    return mount_type, child.name
+                return mount_type, f"{child.name}/{sub}"
+        return None
+
+    def has_entries(self, *, mount_types: list[MountType] | None = None) -> bool:
+        selected_mounts = self._normalize_mount_types(mount_types)
+        if not selected_mounts:
+            return False
+        placeholders = ", ".join("?" for _ in selected_mounts)
+        params = [str(self._context_path), *[mount.value for mount in selected_mounts]]
+        with self._connect() as connection:
+            row = connection.execute(
+                f"""
+                SELECT COUNT(1) AS count
+                FROM file_index
+                WHERE context_path = ?
+                  AND mount_type IN ({placeholders})
+                """,
+                params,
+            ).fetchone()
+        return bool(row and int(row["count"]) > 0)
+
+    def needs_refresh(self, *, mount_types: list[MountType] | None = None) -> bool:
+        selected_mounts = self._normalize_mount_types(mount_types)
+        if not selected_mounts:
+            return False
+
+        fs_snapshot = self._filesystem_file_snapshot(selected_mounts)
+        db_snapshot = self._indexed_file_snapshot(selected_mounts)
+
+        for mount_type in selected_mounts:
+            key = mount_type.value
+            fs_count, fs_max_modified = fs_snapshot.get(key, (0, None))
+            db_count, db_max_modified = db_snapshot.get(key, (0, None))
+            if fs_count != db_count:
+                return True
+            if fs_max_modified != db_max_modified:
+                return True
+        return False
+
+    def query(
+        self,
+        *,
+        query: str | None = None,
+        mount_types: list[MountType] | None = None,
+        relative_prefix: str | None = None,
+        limit: int = 25,
+        include_content: bool = False,
+    ) -> list[dict[str, Any]]:
+        selected_mounts = self._normalize_mount_types(mount_types)
+        if not selected_mounts:
+            return []
+
+        normalized_prefix = _normalize_relative_prefix(relative_prefix)
+        normalized_query = (query or "").strip()
+        limit_value = max(1, min(limit, 500))
+
+        rows = []
+        fts_query = _build_fts_query(normalized_query) if normalized_query else None
+        if normalized_query and self._fts_enabled and fts_query:
+            rows = self._query_with_fts(
+                fts_query=fts_query,
+                mount_types=selected_mounts,
+                relative_prefix=normalized_prefix,
+                limit=limit_value,
+            )
+
+        if not rows:
+            rows = self._query_with_like(
+                query=normalized_query,
+                mount_types=selected_mounts,
+                relative_prefix=normalized_prefix,
+                limit=limit_value,
+            )
+
+        return [
+            self._row_to_payload(
+                row=row,
+                query=normalized_query,
+                include_content=include_content,
+            )
+            for row in rows
+        ]
+
+    def _query_with_fts(
+        self,
+        *,
+        fts_query: str,
+        mount_types: list[MountType],
+        relative_prefix: str,
+        limit: int,
+    ) -> list[sqlite3.Row]:
+        where = ["fi.context_path = ?"]
+        params: list[Any] = [str(self._context_path)]
+
+        placeholders = ", ".join("?" for _ in mount_types)
+        where.append(f"fi.mount_type IN ({placeholders})")
+        params.extend([mount.value for mount in mount_types])
+
+        if relative_prefix:
+            where.append("fi.relative_path LIKE ?")
+            params.append(f"{relative_prefix}%")
+
+        with self._connect() as connection:
+            return connection.execute(
+                f"""
+                SELECT
+                    fi.mount_type,
+                    fi.relative_path,
+                    fi.absolute_path,
+                    fi.is_dir,
+                    fi.size_bytes,
+                    fi.modified_at,
+                    fi.indexed_at,
+                    fi.content_text,
+                    bm25(file_index_fts) AS relevance_score
+                FROM file_index_fts
+                JOIN file_index fi ON fi.rowid = file_index_fts.rowid
+                WHERE file_index_fts MATCH ?
+                  AND {" AND ".join(where)}
+                ORDER BY relevance_score ASC, fi.is_dir ASC, fi.modified_at DESC, fi.relative_path ASC
+                LIMIT ?
+                """,
+                [fts_query, *params, limit],
+            ).fetchall()
+
+    def _query_with_like(
+        self,
+        *,
+        query: str,
+        mount_types: list[MountType],
+        relative_prefix: str,
+        limit: int,
+    ) -> list[sqlite3.Row]:
+        where = ["context_path = ?"]
+        params: list[Any] = [str(self._context_path)]
+
+        placeholders = ", ".join("?" for _ in mount_types)
+        where.append(f"mount_type IN ({placeholders})")
+        params.extend([mount.value for mount in mount_types])
+
+        if relative_prefix:
+            where.append("relative_path LIKE ?")
+            params.append(f"{relative_prefix}%")
+
+        if query:
+            token = f"%{query.lower()}%"
+            where.append(
+                "(LOWER(relative_path) LIKE ? OR LOWER(COALESCE(content_text, '')) LIKE ?)"
+            )
+            params.extend([token, token])
+
+        with self._connect() as connection:
+            return connection.execute(
+                f"""
+                SELECT
+                    mount_type,
+                    relative_path,
+                    absolute_path,
+                    is_dir,
+                    size_bytes,
+                    modified_at,
+                    indexed_at,
+                    content_text,
+                    NULL AS relevance_score
+                FROM file_index
+                WHERE {" AND ".join(where)}
+                ORDER BY is_dir ASC, modified_at DESC, relative_path ASC
+                LIMIT ?
+                """,
+                [*params, limit],
+            ).fetchall()
+
+    def _row_to_payload(
+        self,
+        *,
+        row: sqlite3.Row,
+        query: str,
+        include_content: bool,
+    ) -> dict[str, Any]:
+        content_text = row["content_text"] if isinstance(row["content_text"], str) else ""
+        payload: dict[str, Any] = {
+            "mount_type": row["mount_type"],
+            "relative_path": row["relative_path"],
+            "absolute_path": row["absolute_path"],
+            "is_dir": bool(row["is_dir"]),
+            "size_bytes": int(row["size_bytes"]),
+            "modified_at": row["modified_at"],
+            "indexed_at": row["indexed_at"],
+            "content_excerpt": _build_excerpt(content_text, query),
+        }
+        score = row["relevance_score"]
+        if isinstance(score, (int, float)):
+            payload["relevance_score"] = float(score)
+        if include_content:
+            payload["content"] = content_text
+        return payload
+
+    def _build_row(
+        self,
+        mount_type: MountType,
+        *,
+        relative_path: str,
+        entry: Path,
+        include_content: bool,
+        max_file_size_bytes: int,
+        max_content_chars: int,
+        indexed_at: str,
+    ) -> tuple[tuple[Any, ...], str | None]:
+        normalized = _normalize_relative_path(relative_path)
+        if not normalized:
+            raise OSError("relative path is empty")
+
+        stat = entry.stat()
+        is_dir = entry.is_dir()
+        content_text: str | None = None
+        content_hash: str | None = None
+        reason: str | None = None
+
+        if include_content and entry.is_file():
+            content_text, content_hash, reason = _read_text_for_indexing(
+                entry,
+                size_bytes=stat.st_size,
+                max_file_size_bytes=max_file_size_bytes,
+                max_content_chars=max_content_chars,
+            )
+
+        row = (
+            str(self._context_path),
+            mount_type.value,
+            normalized,
+            str(entry),
+            1 if is_dir else 0,
+            stat.st_size,
+            _iso_utc(stat.st_mtime),
+            content_text,
+            content_hash,
+            indexed_at,
+        )
+        return row, reason
+
+    def _filesystem_file_snapshot(
+        self,
+        mount_types: list[MountType],
+    ) -> dict[str, tuple[int, str | None]]:
+        snapshot: dict[str, tuple[int, str | None]] = {}
+        for mount_type in mount_types:
+            count = 0
+            max_modified: str | None = None
+            try:
+                mount_root = self._manager.resolve_mount_root(self._context_path, mount_type)
+            except Exception:
+                snapshot[mount_type.value] = (0, None)
+                continue
+            if not mount_root.exists():
+                snapshot[mount_type.value] = (0, None)
+                continue
+
+            for entry, _relative_path in _iter_mount_entries(mount_root):
+                if not entry.is_file():
+                    continue
+                try:
+                    modified = _iso_utc(entry.stat().st_mtime)
+                except OSError:
+                    continue
+                count += 1
+                if max_modified is None or modified > max_modified:
+                    max_modified = modified
+            snapshot[mount_type.value] = (count, max_modified)
+        return snapshot
+
+    def _indexed_file_snapshot(
+        self,
+        mount_types: list[MountType],
+    ) -> dict[str, tuple[int, str | None]]:
+        placeholders = ", ".join("?" for _ in mount_types)
+        params = [str(self._context_path), *[mount.value for mount in mount_types]]
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT mount_type, COUNT(1) AS count, MAX(modified_at) AS max_modified
+                FROM file_index
+                WHERE context_path = ?
+                  AND is_dir = 0
+                  AND mount_type IN ({placeholders})
+                GROUP BY mount_type
+                """,
+                params,
+            ).fetchall()
+        snapshot: dict[str, tuple[int, str | None]] = {
+            mount.value: (0, None) for mount in mount_types
+        }
+        for row in rows:
+            snapshot[row["mount_type"]] = (int(row["count"]), row["max_modified"])
+        return snapshot
+
+    def _default_db_path(self) -> Path:
+        configured_name = DEFAULT_DB_FILENAME
+        try:
+            raw_name = self._manager.config.context_index.db_filename
+        except Exception:
+            raw_name = DEFAULT_DB_FILENAME
+        if isinstance(raw_name, str) and raw_name.strip():
+            configured_name = raw_name.strip()
+
+        configured_path = Path(configured_name).expanduser()
+        if configured_path.is_absolute():
+            return configured_path.resolve()
+
+        global_root = self._manager.resolve_mount_root(self._context_path, MountType.GLOBAL)
+        global_root.mkdir(parents=True, exist_ok=True)
+        return (global_root / configured_path).resolve()
+
+    def _initialize(self) -> None:
+        with self._connect() as connection:
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("PRAGMA synchronous=NORMAL")
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS file_index (
+                    context_path TEXT NOT NULL,
+                    mount_type TEXT NOT NULL,
+                    relative_path TEXT NOT NULL,
+                    absolute_path TEXT NOT NULL,
+                    is_dir INTEGER NOT NULL,
+                    size_bytes INTEGER NOT NULL,
+                    modified_at TEXT,
+                    content_text TEXT,
+                    content_hash TEXT,
+                    indexed_at TEXT NOT NULL,
+                    PRIMARY KEY (context_path, mount_type, relative_path)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_file_index_context_mount
+                ON file_index (context_path, mount_type)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_file_index_relative_path
+                ON file_index (relative_path)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_file_index_modified_at
+                ON file_index (modified_at)
+                """
+            )
+            self._fts_enabled = self._initialize_fts(connection)
+            connection.commit()
+
+    def _initialize_fts(self, connection: sqlite3.Connection) -> bool:
+        try:
+            connection.execute(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS file_index_fts
+                USING fts5(
+                    relative_path,
+                    content_text,
+                    content='file_index',
+                    content_rowid='rowid'
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TRIGGER IF NOT EXISTS file_index_ai
+                AFTER INSERT ON file_index
+                BEGIN
+                    INSERT INTO file_index_fts(rowid, relative_path, content_text)
+                    VALUES (new.rowid, new.relative_path, COALESCE(new.content_text, ''));
+                END
+                """
+            )
+            connection.execute(
+                """
+                CREATE TRIGGER IF NOT EXISTS file_index_ad
+                AFTER DELETE ON file_index
+                BEGIN
+                    INSERT INTO file_index_fts(file_index_fts, rowid, relative_path, content_text)
+                    VALUES ('delete', old.rowid, old.relative_path, COALESCE(old.content_text, ''));
+                END
+                """
+            )
+            connection.execute(
+                """
+                CREATE TRIGGER IF NOT EXISTS file_index_au
+                AFTER UPDATE ON file_index
+                BEGIN
+                    INSERT INTO file_index_fts(file_index_fts, rowid, relative_path, content_text)
+                    VALUES ('delete', old.rowid, old.relative_path, COALESCE(old.content_text, ''));
+                    INSERT INTO file_index_fts(rowid, relative_path, content_text)
+                    VALUES (new.rowid, new.relative_path, COALESCE(new.content_text, ''));
+                END
+                """
+            )
+
+            row_count = connection.execute("SELECT COUNT(1) FROM file_index").fetchone()[0]
+            fts_count = connection.execute("SELECT COUNT(1) FROM file_index_fts").fetchone()[0]
+            if row_count > 0 and fts_count == 0:
+                connection.execute("INSERT INTO file_index_fts(file_index_fts) VALUES ('rebuild')")
+            return True
+        except sqlite3.OperationalError:
+            return False
+
+    def _delete_rows_for_mounts(self, mount_types: list[MountType]) -> int:
+        if not mount_types:
+            return 0
+        placeholders = ", ".join("?" for _ in mount_types)
+        params = [str(self._context_path), *[mount.value for mount in mount_types]]
+        with self._connect() as connection:
+            cursor = connection.execute(
+                f"""
+                DELETE FROM file_index
+                WHERE context_path = ?
+                  AND mount_type IN ({placeholders})
+                """,
+                params,
+            )
+            connection.commit()
+            if cursor.rowcount is None or cursor.rowcount < 0:
+                return 0
+            return int(cursor.rowcount)
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self._db_path)
+        connection.row_factory = sqlite3.Row
+        return connection
+
+    @staticmethod
+    def _normalize_mount_types(mount_types: list[MountType] | None) -> list[MountType]:
+        source = mount_types or list(MountType)
+        normalized: list[MountType] = []
+        seen: set[MountType] = set()
+        for mount_type in source:
+            if mount_type in seen:
+                continue
+            seen.add(mount_type)
+            normalized.append(mount_type)
+        return normalized
+
+
+def _is_text_candidate(path: Path) -> bool:
+    suffix = path.suffix.lower()
+    if suffix in _TEXT_SUFFIXES:
+        return True
+    return suffix == ""
+
+
+def _iter_mount_entries(mount_root: Path):
+    try:
+        children = sorted(mount_root.iterdir(), key=lambda item: item.name)
+    except OSError:
+        return
+
+    for child in children:
+        if child.name == ".keep":
+            continue
+        yield child, child.relative_to(mount_root).as_posix()
+
+        if not child.is_dir():
+            continue
+
+        if child.is_symlink():
+            try:
+                scan_root = child.resolve()
+            except OSError:
+                continue
+            prefix = child.name
+        else:
+            scan_root = child
+            prefix = ""
+
+        if not scan_root.exists() or not scan_root.is_dir():
+            continue
+
+        for nested in scan_root.rglob("*"):
+            if nested.name == ".keep":
+                continue
+            nested_relative = nested.relative_to(scan_root).as_posix()
+            if not nested_relative:
+                continue
+            if prefix:
+                yield nested, f"{prefix}/{nested_relative}"
+            else:
+                yield nested, nested.relative_to(mount_root).as_posix()
+
+
+def _read_text_for_indexing(
+    path: Path,
+    *,
+    size_bytes: int,
+    max_file_size_bytes: int,
+    max_content_chars: int,
+) -> tuple[str | None, str | None, str | None]:
+    if not _is_text_candidate(path):
+        return None, None, None
+    if size_bytes > max_file_size_bytes:
+        return None, None, "too_large"
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return None, None, None
+    if b"\x00" in raw[:4096]:
+        return None, None, "binary"
+    text = raw.decode("utf-8", errors="replace")
+    if max_content_chars > 0:
+        text = text[:max_content_chars]
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return text, digest, None
+
+
+def _build_excerpt(content: str, query: str) -> str | None:
+    if not content:
+        return None
+    compact = " ".join(content.split())
+    if not compact:
+        return None
+    if not query:
+        return compact[:220]
+    lowered = compact.lower()
+    needle = query.lower()
+    index = lowered.find(needle)
+    if index < 0:
+        return compact[:220]
+    start = max(0, index - 90)
+    end = min(len(compact), index + len(needle) + 130)
+    return compact[start:end]
+
+
+def _build_fts_query(query: str) -> str | None:
+    tokens = [token.lower() for token in re.findall(r"[A-Za-z0-9_./-]+", query)]
+    if not tokens:
+        return None
+    return " AND ".join(f'"{token}"' for token in tokens)
+
+
+def _normalize_relative_path(path: str) -> str:
+    candidate = path.strip().replace("\\", "/")
+    while candidate.startswith("./"):
+        candidate = candidate[2:]
+    candidate = candidate.lstrip("/")
+    if not candidate:
+        return ""
+
+    raw_parts = [part for part in candidate.split("/") if part and part != "."]
+    if any(part == ".." for part in raw_parts):
+        return ""
+    return "/".join(raw_parts)
+
+
+def _normalize_relative_prefix(path: str | None) -> str:
+    if path is None:
+        return ""
+    return _normalize_relative_path(path)
+
+
+def _iso_utc(timestamp: float) -> str:
+    return datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
