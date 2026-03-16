@@ -111,6 +111,16 @@ Paths are scoped to:
 - configured `general.context_root`
 - local project `.context`
 
+`context.init` is intended for Gemini-style project bootstrap:
+
+- local project init when the target project is under the current working directory
+- explicit `context_root` under an allowed root for centralized/shared contexts
+
+Gemini-friendly prompts/resources are also exposed over MCP:
+
+- prompts: `afs.context.overview`, `afs.query.search`, `afs.scratchpad.review`
+- resources: `afs://contexts`, `afs://context/<path>/metadata`, `.../mounts`, `.../index`
+
 ## Gemini / Antigravity Registration
 
 Recommended command target:

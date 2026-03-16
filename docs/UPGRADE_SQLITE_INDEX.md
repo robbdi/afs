@@ -11,7 +11,7 @@ truth for all reads, writes, and mounts. The SQLite layer adds:
 
 - **Full-text search** (FTS5) across file paths and content
 - **Structured queries** with mount type, path prefix, and content filters
-- **Staleness detection** to know when the index is out of date
+- **Fingerprint-based staleness detection** to know when the index is out of date
 - **Incremental sync** — writes and mount/unmount operations automatically update
   the index without a full rebuild
 
@@ -95,6 +95,9 @@ Search the index with text queries, path prefixes, and mount type filters.
 
 Results include `relevance_score` when FTS matches, plus `content_excerpt` with
 context around the match.
+
+The same query path now powers the Gemini-facing `afs.query.search` MCP prompt,
+including automatic refresh when the index is stale.
 
 ## Upgrading from a previous AFS version
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from afs.manager import AFSManager
@@ -74,8 +75,9 @@ def test_fs_write_and_read_tool_calls(tmp_path: Path) -> None:
     assert read_response["result"]["structuredContent"]["content"] == "hello"
 
 
-def test_context_init_tool_creates_project_context(tmp_path: Path) -> None:
+def test_context_init_tool_creates_project_context(tmp_path: Path, monkeypatch) -> None:
     manager = _make_manager(tmp_path)
+    monkeypatch.chdir(tmp_path)
     project_root = tmp_path / "workspace_project"
     project_root.mkdir(parents=True)
 
@@ -95,6 +97,55 @@ def test_context_init_tool_creates_project_context(tmp_path: Path) -> None:
     structured = init_response["result"]["structuredContent"]
     assert structured["context_path"] == str(project_root / ".context")
     assert (project_root / ".context").exists()
+
+
+def test_context_init_rejects_project_outside_cwd_without_allowed_context_root(tmp_path: Path) -> None:
+    manager = _make_manager(tmp_path)
+    project_root = tmp_path / "workspace_project"
+    project_root.mkdir(parents=True)
+
+    init_response = _handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 50,
+            "method": "tools/call",
+            "params": {
+                "name": "context.init",
+                "arguments": {"project_path": str(project_root)},
+            },
+        },
+        manager,
+    )
+    assert init_response is not None
+    assert "error" in init_response
+    assert "current working directory" in init_response["error"]["message"]
+
+
+def test_context_init_allows_explicit_allowed_context_root_outside_cwd(tmp_path: Path) -> None:
+    manager = _make_manager(tmp_path)
+    project_root = tmp_path / "workspace_project"
+    project_root.mkdir(parents=True)
+    context_root = manager.config.general.context_root / "projects" / "workspace_project"
+
+    init_response = _handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 51,
+            "method": "tools/call",
+            "params": {
+                "name": "context.init",
+                "arguments": {
+                    "project_path": str(project_root),
+                    "context_root": str(context_root),
+                },
+            },
+        },
+        manager,
+    )
+    assert init_response is not None
+    structured = init_response["result"]["structuredContent"]
+    assert structured["context_path"] == str(context_root)
+    assert context_root.exists()
 
 
 def test_context_unmount_tool_removes_alias(tmp_path: Path) -> None:
@@ -437,6 +488,68 @@ def test_fs_delete_updates_context_index(tmp_path: Path) -> None:
     assert not any(entry["relative_path"] == "delete_me.md" for entry in entries)
 
 
+def test_fs_delete_directory_removes_nested_index_entries(tmp_path: Path) -> None:
+    manager = _make_manager(tmp_path)
+    context_root = manager.config.general.context_root
+    docs_dir = context_root / "scratchpad" / "docs"
+    docs_dir.mkdir()
+    nested = docs_dir / "guide.md"
+    nested.write_text("nested delete marker", encoding="utf-8")
+
+    rebuild_response = _handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 42,
+            "method": "tools/call",
+            "params": {
+                "name": "context.index.rebuild",
+                "arguments": {
+                    "context_path": str(context_root),
+                    "mount_types": ["scratchpad"],
+                },
+            },
+        },
+        manager,
+    )
+    assert rebuild_response is not None
+
+    delete_response = _handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 43,
+            "method": "tools/call",
+            "params": {
+                "name": "fs.delete",
+                "arguments": {"path": str(docs_dir), "recursive": True},
+            },
+        },
+        manager,
+    )
+    assert delete_response is not None
+    assert delete_response["result"]["structuredContent"]["index_updated"] is True
+
+    query_response = _handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 44,
+            "method": "tools/call",
+            "params": {
+                "name": "context.query",
+                "arguments": {
+                    "context_path": str(context_root),
+                    "mount_types": ["scratchpad"],
+                    "query": "nested delete marker",
+                    "auto_index": False,
+                },
+            },
+        },
+        manager,
+    )
+    assert query_response is not None
+    entries = query_response["result"]["structuredContent"]["entries"]
+    assert not any(entry["relative_path"].startswith("docs/") for entry in entries)
+
+
 def test_fs_move_updates_context_index(tmp_path: Path) -> None:
     manager = _make_manager(tmp_path)
     context_root = manager.config.general.context_root
@@ -502,6 +615,72 @@ def test_fs_move_updates_context_index(tmp_path: Path) -> None:
     assert not any(entry["relative_path"] == "before.md" for entry in entries)
 
 
+def test_fs_move_directory_updates_nested_context_index_entries(tmp_path: Path) -> None:
+    manager = _make_manager(tmp_path)
+    context_root = manager.config.general.context_root
+    source_dir = context_root / "scratchpad" / "before"
+    destination_dir = context_root / "scratchpad" / "after"
+    source_dir.mkdir()
+    (source_dir / "guide.md").write_text("moved directory marker", encoding="utf-8")
+
+    rebuild_response = _handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 45,
+            "method": "tools/call",
+            "params": {
+                "name": "context.index.rebuild",
+                "arguments": {
+                    "context_path": str(context_root),
+                    "mount_types": ["scratchpad"],
+                },
+            },
+        },
+        manager,
+    )
+    assert rebuild_response is not None
+
+    move_response = _handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 46,
+            "method": "tools/call",
+            "params": {
+                "name": "fs.move",
+                "arguments": {
+                    "source": str(source_dir),
+                    "destination": str(destination_dir),
+                },
+            },
+        },
+        manager,
+    )
+    assert move_response is not None
+    assert move_response["result"]["structuredContent"]["index_updated"] is True
+
+    query_response = _handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 47,
+            "method": "tools/call",
+            "params": {
+                "name": "context.query",
+                "arguments": {
+                    "context_path": str(context_root),
+                    "mount_types": ["scratchpad"],
+                    "query": "moved directory marker",
+                    "auto_index": False,
+                },
+            },
+        },
+        manager,
+    )
+    assert query_response is not None
+    entries = query_response["result"]["structuredContent"]["entries"]
+    assert any(entry["relative_path"] == "after/guide.md" for entry in entries)
+    assert not any(entry["relative_path"] == "before/guide.md" for entry in entries)
+
+
 def test_context_query_auto_refreshes_after_external_write(tmp_path: Path) -> None:
     manager = _make_manager(tmp_path)
     context_root = manager.config.general.context_root
@@ -550,6 +729,56 @@ def test_context_query_auto_refreshes_after_external_write(tmp_path: Path) -> No
     assert "index_rebuild" in structured
 
 
+def test_context_query_auto_refreshes_after_external_rename(tmp_path: Path) -> None:
+    manager = _make_manager(tmp_path)
+    context_root = manager.config.general.context_root
+    source = context_root / "scratchpad" / "before.md"
+    destination = context_root / "scratchpad" / "after.md"
+    source.write_text("rename freshness marker", encoding="utf-8")
+
+    rebuild_response = _handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 52,
+            "method": "tools/call",
+            "params": {
+                "name": "context.index.rebuild",
+                "arguments": {
+                    "context_path": str(context_root),
+                    "mount_types": ["scratchpad"],
+                },
+            },
+        },
+        manager,
+    )
+    assert rebuild_response is not None
+
+    source.rename(destination)
+
+    query_response = _handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 53,
+            "method": "tools/call",
+            "params": {
+                "name": "context.query",
+                "arguments": {
+                    "context_path": str(context_root),
+                    "mount_types": ["scratchpad"],
+                    "query": "rename freshness marker",
+                    "auto_index": True,
+                },
+            },
+        },
+        manager,
+    )
+    assert query_response is not None
+    structured = query_response["result"]["structuredContent"]
+    assert any(entry["relative_path"] == "after.md" for entry in structured["entries"])
+    assert not any(entry["relative_path"] == "before.md" for entry in structured["entries"])
+    assert "index_rebuild" in structured
+
+
 def test_initialize_advertises_resources_and_prompts(tmp_path: Path) -> None:
     manager = _make_manager(tmp_path)
     response = _handle_request(
@@ -589,15 +818,47 @@ def test_resources_read_contexts(tmp_path: Path) -> None:
     assert len(contents) == 1
     assert contents[0]["uri"] == "afs://contexts"
     assert contents[0]["mimeType"] == "application/json"
-    import json
     data = json.loads(contents[0]["text"])
     assert isinstance(data, list)
+
+
+def test_resources_read_contexts_filters_out_disallowed_contexts(
+    tmp_path: Path, monkeypatch
+) -> None:
+    manager = _make_manager(tmp_path)
+    allowed_context = manager.config.general.context_root
+    outside_context = tmp_path / "outside" / ".context"
+    outside_context.mkdir(parents=True)
+    (outside_context / "scratchpad").mkdir()
+
+    allowed_root = manager.list_context(context_path=allowed_context)
+    outside_root = manager.list_context(context_path=outside_context)
+
+    monkeypatch.setattr(
+        "afs.mcp_server.discover_contexts",
+        lambda config=None: [allowed_root, outside_root],
+    )
+
+    response = _handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 54,
+            "method": "resources/read",
+            "params": {"uri": "afs://contexts"},
+        },
+        manager,
+    )
+    assert response is not None
+    contents = response["result"]["contents"]
+    data = json.loads(contents[0]["text"])
+    paths = {entry["path"] for entry in data}
+    assert str(allowed_context) in paths
+    assert str(outside_context) not in paths
 
 
 def test_resources_read_metadata(tmp_path: Path) -> None:
     manager = _make_manager(tmp_path)
     context_root = manager.config.general.context_root
-    import json
     (context_root / "metadata.json").write_text(
         json.dumps({"created_at": "2025-01-01", "description": "test", "agents": []}),
         encoding="utf-8",
@@ -625,7 +886,6 @@ def test_resources_read_index(tmp_path: Path) -> None:
     assert response is not None
     contents = response["result"]["contents"]
     assert len(contents) == 1
-    import json
     data = json.loads(contents[0]["text"])
     assert "has_entries" in data
     assert "needs_refresh" in data
@@ -646,6 +906,29 @@ def test_resources_read_unknown_uri(tmp_path: Path) -> None:
     assert "error" in response
 
 
+def test_resources_read_rejects_context_outside_allowed_roots(tmp_path: Path) -> None:
+    manager = _make_manager(tmp_path)
+    outside_context = tmp_path / "outside" / ".context"
+    outside_context.mkdir(parents=True)
+    (outside_context / "metadata.json").write_text(
+        json.dumps({"created_at": "2025-01-01", "description": "outside", "agents": []}),
+        encoding="utf-8",
+    )
+
+    response = _handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 48,
+            "method": "resources/read",
+            "params": {"uri": f"afs://context/{outside_context}/metadata"},
+        },
+        manager,
+    )
+    assert response is not None
+    assert "error" in response
+    assert "Path outside allowed roots" in response["error"]["message"]
+
+
 def test_prompts_list_returns_expected_prompts(tmp_path: Path) -> None:
     manager = _make_manager(tmp_path)
     response = _handle_request(
@@ -664,7 +947,6 @@ def test_prompts_list_returns_expected_prompts(tmp_path: Path) -> None:
 def test_prompts_get_context_overview(tmp_path: Path) -> None:
     manager = _make_manager(tmp_path)
     context_root = manager.config.general.context_root
-    import json
     (context_root / "metadata.json").write_text(
         json.dumps({
             "created_at": "2025-01-01",
@@ -720,6 +1002,58 @@ def test_prompts_get_query_search(tmp_path: Path) -> None:
     assert "prompt search" in text.lower() or "Search results" in text
 
 
+def test_prompts_get_query_search_supports_context_path_and_auto_refresh(
+    tmp_path: Path,
+) -> None:
+    manager = _make_manager(tmp_path)
+    context_root = manager.config.general.context_root
+    source = context_root / "scratchpad" / "before.md"
+    destination = context_root / "scratchpad" / "after.md"
+    source.write_text("prompt rename marker", encoding="utf-8")
+
+    rebuild_response = _handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 55,
+            "method": "tools/call",
+            "params": {
+                "name": "context.index.rebuild",
+                "arguments": {
+                    "context_path": str(context_root),
+                    "mount_types": ["scratchpad"],
+                },
+            },
+        },
+        manager,
+    )
+    assert rebuild_response is not None
+
+    source.rename(destination)
+
+    response = _handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 56,
+            "method": "prompts/get",
+            "params": {
+                "name": "afs.query.search",
+                "arguments": {
+                    "context_path": str(context_root),
+                    "query": "prompt rename marker",
+                    "mount_types": "scratchpad",
+                },
+            },
+        },
+        manager,
+    )
+    assert response is not None
+    messages = response["result"]["messages"]
+    text = messages[0]["content"]["text"]
+    assert "after.md" in text
+    assert "before.md" not in text
+    assert "Index refreshed before search." in text
+
+
 def test_prompts_get_scratchpad_review(tmp_path: Path) -> None:
     manager = _make_manager(tmp_path)
     context_root = manager.config.general.context_root
@@ -762,6 +1096,30 @@ def test_prompts_get_unknown_prompt(tmp_path: Path) -> None:
     )
     assert response is not None
     assert "error" in response
+
+
+def test_prompts_get_rejects_context_outside_allowed_roots(tmp_path: Path) -> None:
+    manager = _make_manager(tmp_path)
+    outside_context = tmp_path / "outside" / ".context"
+    scratchpad = outside_context / "scratchpad"
+    scratchpad.mkdir(parents=True)
+    (scratchpad / "state.md").write_text("outside state", encoding="utf-8")
+
+    response = _handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 49,
+            "method": "prompts/get",
+            "params": {
+                "name": "afs.scratchpad.review",
+                "arguments": {"context_path": str(outside_context)},
+            },
+        },
+        manager,
+    )
+    assert response is not None
+    assert "error" in response
+    assert "Path outside allowed roots" in response["error"]["message"]
 
 
 def test_extension_mcp_tools_are_registered_and_callable(tmp_path: Path) -> None:

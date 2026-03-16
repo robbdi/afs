@@ -162,6 +162,7 @@ class AFSManager:
             "context",
             "afs.manager",
             op="mount",
+            context_root=context_path,
             metadata={
                 "mount_type": mount_type.value,
                 "alias": alias,
@@ -200,6 +201,7 @@ class AFSManager:
                 "context",
                 "afs.manager",
                 op="unmount",
+                context_root=context_path,
                 metadata={
                     "mount_type": mount_type.value,
                     "alias": alias,
@@ -443,6 +445,7 @@ class AFSManager:
             "context",
             "afs.manager",
             op="apply_profile",
+            context_root=context_path,
             metadata={
                 "profile": result.profile_name,
                 "context_path": str(context_path),

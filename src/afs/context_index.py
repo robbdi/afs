@@ -81,6 +81,13 @@ class IndexSummary:
         }
 
 
+@dataclass(frozen=True)
+class MountSnapshot:
+    count: int
+    max_modified: str | None
+    fingerprint: str
+
+
 class ContextSQLiteIndex:
     """Persistent SQLite index of context mount entries."""
 
@@ -240,6 +247,41 @@ class ContextSQLiteIndex:
             connection.commit()
         return True
 
+    def sync_absolute_path(
+        self,
+        absolute_path: Path,
+        *,
+        include_content: bool = True,
+        max_file_size_bytes: int = DEFAULT_MAX_FILE_SIZE_BYTES,
+        max_content_chars: int = DEFAULT_MAX_CONTENT_CHARS,
+    ) -> bool:
+        inferred = self.infer_relative_for_absolute_path(absolute_path)
+        if not inferred:
+            return False
+
+        mount_type, relative_path = inferred
+        candidate = absolute_path.expanduser().resolve()
+        if candidate.exists():
+            if candidate.is_dir():
+                self.rebuild(
+                    mount_types=[mount_type],
+                    include_content=include_content,
+                    max_file_size_bytes=max_file_size_bytes,
+                    max_content_chars=max_content_chars,
+                )
+                return True
+            self.upsert_relative_path(
+                mount_type,
+                relative_path,
+                include_content=include_content,
+                max_file_size_bytes=max_file_size_bytes,
+                max_content_chars=max_content_chars,
+            )
+            return True
+
+        self.delete_relative_prefix(mount_type, relative_path)
+        return True
+
     def delete_relative_path(self, mount_type: MountType, relative_path: str) -> int:
         normalized = _normalize_relative_path(relative_path)
         if not normalized:
@@ -254,6 +296,34 @@ class ContextSQLiteIndex:
                   AND relative_path = ?
                 """,
                 (str(self._context_path), mount_type.value, normalized),
+            )
+            connection.commit()
+            if cursor.rowcount is None or cursor.rowcount < 0:
+                return 0
+            return int(cursor.rowcount)
+
+    def delete_relative_prefix(self, mount_type: MountType, relative_path: str) -> int:
+        normalized = _normalize_relative_path(relative_path)
+        if not normalized:
+            return 0
+
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                DELETE FROM file_index
+                WHERE context_path = ?
+                  AND mount_type = ?
+                  AND (
+                    relative_path = ?
+                    OR relative_path LIKE ?
+                  )
+                """,
+                (
+                    str(self._context_path),
+                    mount_type.value,
+                    normalized,
+                    f"{normalized}/%",
+                ),
             )
             connection.commit()
             if cursor.rowcount is None or cursor.rowcount < 0:
@@ -327,16 +397,14 @@ class ContextSQLiteIndex:
         if not selected_mounts:
             return False
 
-        fs_snapshot = self._filesystem_file_snapshot(selected_mounts)
-        db_snapshot = self._indexed_file_snapshot(selected_mounts)
+        fs_snapshot = self._filesystem_snapshot(selected_mounts)
+        db_snapshot = self._indexed_snapshot(selected_mounts)
 
         for mount_type in selected_mounts:
             key = mount_type.value
-            fs_count, fs_max_modified = fs_snapshot.get(key, (0, None))
-            db_count, db_max_modified = db_snapshot.get(key, (0, None))
-            if fs_count != db_count:
-                return True
-            if fs_max_modified != db_max_modified:
+            if fs_snapshot.get(key, _empty_mount_snapshot()) != db_snapshot.get(
+                key, _empty_mount_snapshot()
+            ):
                 return True
         return False
 
@@ -541,59 +609,95 @@ class ContextSQLiteIndex:
         )
         return row, reason
 
-    def _filesystem_file_snapshot(
+    def _filesystem_snapshot(
         self,
         mount_types: list[MountType],
-    ) -> dict[str, tuple[int, str | None]]:
-        snapshot: dict[str, tuple[int, str | None]] = {}
+    ) -> dict[str, MountSnapshot]:
+        snapshot: dict[str, MountSnapshot] = {}
         for mount_type in mount_types:
             count = 0
             max_modified: str | None = None
+            fingerprint = hashlib.sha256()
             try:
                 mount_root = self._manager.resolve_mount_root(self._context_path, mount_type)
             except Exception:
-                snapshot[mount_type.value] = (0, None)
+                snapshot[mount_type.value] = _empty_mount_snapshot()
                 continue
             if not mount_root.exists():
-                snapshot[mount_type.value] = (0, None)
+                snapshot[mount_type.value] = _empty_mount_snapshot()
                 continue
 
-            for entry, _relative_path in _iter_mount_entries(mount_root):
-                if not entry.is_file():
-                    continue
+            for entry, relative_path in _iter_mount_entries(mount_root):
                 try:
-                    modified = _iso_utc(entry.stat().st_mtime)
+                    stat = entry.stat()
                 except OSError:
                     continue
+                modified = _iso_utc(stat.st_mtime)
                 count += 1
                 if max_modified is None or modified > max_modified:
                     max_modified = modified
-            snapshot[mount_type.value] = (count, max_modified)
+                _update_snapshot_fingerprint(
+                    fingerprint,
+                    relative_path=relative_path,
+                    is_dir=entry.is_dir(),
+                    size_bytes=stat.st_size,
+                    modified_at=modified,
+                )
+            snapshot[mount_type.value] = MountSnapshot(
+                count=count,
+                max_modified=max_modified,
+                fingerprint=fingerprint.hexdigest(),
+            )
         return snapshot
 
-    def _indexed_file_snapshot(
+    def _indexed_snapshot(
         self,
         mount_types: list[MountType],
-    ) -> dict[str, tuple[int, str | None]]:
+    ) -> dict[str, MountSnapshot]:
         placeholders = ", ".join("?" for _ in mount_types)
         params = [str(self._context_path), *[mount.value for mount in mount_types]]
+        snapshot_state: dict[str, dict[str, Any]] = {
+            mount.value: {
+                "count": 0,
+                "max_modified": None,
+                "fingerprint": hashlib.sha256(),
+            }
+            for mount in mount_types
+        }
         with self._connect() as connection:
             rows = connection.execute(
                 f"""
-                SELECT mount_type, COUNT(1) AS count, MAX(modified_at) AS max_modified
+                SELECT mount_type, relative_path, is_dir, size_bytes, modified_at
                 FROM file_index
                 WHERE context_path = ?
-                  AND is_dir = 0
                   AND mount_type IN ({placeholders})
-                GROUP BY mount_type
+                ORDER BY mount_type ASC, relative_path ASC
                 """,
                 params,
-            ).fetchall()
-        snapshot: dict[str, tuple[int, str | None]] = {
-            mount.value: (0, None) for mount in mount_types
-        }
-        for row in rows:
-            snapshot[row["mount_type"]] = (int(row["count"]), row["max_modified"])
+            )
+            for row in rows:
+                state = snapshot_state[row["mount_type"]]
+                modified = row["modified_at"]
+                state["count"] += 1
+                if isinstance(modified, str) and (
+                    state["max_modified"] is None or modified > state["max_modified"]
+                ):
+                    state["max_modified"] = modified
+                _update_snapshot_fingerprint(
+                    state["fingerprint"],
+                    relative_path=row["relative_path"],
+                    is_dir=bool(row["is_dir"]),
+                    size_bytes=int(row["size_bytes"]),
+                    modified_at=modified,
+                )
+        snapshot: dict[str, MountSnapshot] = {}
+        for mount in mount_types:
+            state = snapshot_state[mount.value]
+            snapshot[mount.value] = MountSnapshot(
+                count=int(state["count"]),
+                max_modified=state["max_modified"],
+                fingerprint=state["fingerprint"].hexdigest(),
+            )
         return snapshot
 
     def _default_db_path(self) -> Path:
@@ -859,6 +963,29 @@ def _normalize_relative_prefix(path: str | None) -> str:
     if path is None:
         return ""
     return _normalize_relative_path(path)
+
+
+def _empty_mount_snapshot() -> MountSnapshot:
+    return MountSnapshot(count=0, max_modified=None, fingerprint=hashlib.sha256(b"").hexdigest())
+
+
+def _update_snapshot_fingerprint(
+    digest: hashlib._Hash,
+    *,
+    relative_path: str,
+    is_dir: bool,
+    size_bytes: int,
+    modified_at: str | None,
+) -> None:
+    entry_type = "d" if is_dir else "f"
+    digest.update(relative_path.encode("utf-8", errors="replace"))
+    digest.update(b"\0")
+    digest.update(entry_type.encode("ascii"))
+    digest.update(b"\0")
+    digest.update(str(size_bytes).encode("ascii"))
+    digest.update(b"\0")
+    digest.update((modified_at or "").encode("utf-8", errors="replace"))
+    digest.update(b"\n")
 
 
 def _iso_utc(timestamp: float) -> str:

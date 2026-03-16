@@ -124,6 +124,7 @@ class ContextFileSystem:
             "fs",
             "afs.context_fs",
             op="read",
+            context_root=self._context_path,
             metadata={
                 "mount_type": mount_type.value,
                 "relative_path": relative_path,
@@ -197,6 +198,7 @@ class ContextFileSystem:
             "fs",
             "afs.context_fs",
             op="write",
+            context_root=self._context_path,
             metadata={
                 "mount_type": mount_type.value,
                 "relative_path": relative_path,

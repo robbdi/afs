@@ -160,11 +160,18 @@ def _allowed_roots(manager: AFSManager) -> list[Path]:
     return roots
 
 
-def _assert_allowed(path: Path, manager: AFSManager) -> Path:
+def _is_allowed_path(path: Path, manager: AFSManager) -> bool:
     resolved = path.expanduser().resolve()
     for root in _allowed_roots(manager):
         if resolved == root or resolved.is_relative_to(root):
-            return resolved
+            return True
+    return False
+
+
+def _assert_allowed(path: Path, manager: AFSManager) -> Path:
+    resolved = path.expanduser().resolve()
+    if _is_allowed_path(resolved, manager):
+        return resolved
     raise PermissionError(f"Path outside allowed roots: {resolved}")
 
 
@@ -181,6 +188,33 @@ def _resolve_project_path(arguments: dict[str, Any]) -> Path:
     if isinstance(raw, str) and raw.strip():
         return Path(raw).expanduser().resolve()
     return Path.cwd().resolve()
+
+
+def _resolve_explicit_allowed_context_path(raw: Any, manager: AFSManager) -> Path:
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError("context_path must be a non-empty string")
+    return _assert_allowed(Path(raw), manager)
+
+
+def _validate_context_init_scope(
+    project_path: Path,
+    *,
+    context_root: Path | None,
+    manager: AFSManager,
+) -> None:
+    if context_root is not None:
+        _assert_allowed(context_root, manager)
+        return
+
+    cwd = Path.cwd().resolve()
+    resolved_project = project_path.expanduser().resolve()
+    if resolved_project == cwd or resolved_project.is_relative_to(cwd):
+        return
+
+    raise PermissionError(
+        "context.init requires project_path under the current working directory "
+        "or an explicit context_root under an allowed root"
+    )
 
 
 def _parse_mount_types(raw: Any) -> list[MountType] | None:
@@ -225,6 +259,21 @@ def _context_index_settings(manager: AFSManager) -> ContextIndexConfig:
     return manager.config.context_index
 
 
+def _resolve_prompt_context_path(arguments: dict[str, Any], manager: AFSManager) -> Path:
+    raw_path = arguments.get("context_path")
+    if isinstance(raw_path, str) and raw_path.strip():
+        return _resolve_explicit_allowed_context_path(raw_path, manager)
+    return manager.config.general.context_root
+
+
+def _discover_allowed_contexts(manager: AFSManager) -> list[Any]:
+    try:
+        contexts = discover_contexts(config=manager.config)
+    except Exception:
+        return []
+    return [ctx for ctx in contexts if _is_allowed_path(ctx.path, manager)]
+
+
 def _context_candidates_for_path(path: Path, manager: AFSManager) -> list[Path]:
     candidates: list[Path] = []
     seen: set[Path] = set()
@@ -258,21 +307,80 @@ def _sync_context_index_for_path(path: Path, manager: AFSManager) -> bool:
     for context_path in _context_candidates_for_path(path, manager):
         try:
             index = ContextSQLiteIndex(manager, context_path)
-            inferred = index.infer_relative_for_absolute_path(path)
-            if not inferred:
-                continue
-            mount_type, relative_path = inferred
-            index.upsert_relative_path(
-                mount_type,
-                relative_path,
+            if not index.sync_absolute_path(
+                path,
                 include_content=settings.include_content,
                 max_file_size_bytes=settings.max_file_size_bytes,
                 max_content_chars=settings.max_content_chars,
-            )
+            ):
+                continue
             return True
         except Exception:
             continue
     return False
+
+
+def _query_context_index(
+    *,
+    context_path: Path,
+    manager: AFSManager,
+    query: str,
+    mount_types: list[MountType] | None,
+    relative_prefix: str | None = None,
+    limit: int = 25,
+    include_content: bool = False,
+    auto_index: bool | None = None,
+    auto_refresh: bool | None = None,
+    refresh: bool = False,
+    max_file_size_bytes: int | None = None,
+    max_content_chars: int | None = None,
+) -> dict[str, Any]:
+    settings = _context_index_settings(manager)
+    limit_value = max(1, min(limit, 500))
+    effective_auto_index = settings.auto_index if auto_index is None else auto_index
+    effective_auto_refresh = settings.auto_refresh if auto_refresh is None else auto_refresh
+    effective_max_file_size_bytes = settings.max_file_size_bytes
+    if isinstance(max_file_size_bytes, int) and max_file_size_bytes >= 1024:
+        effective_max_file_size_bytes = max_file_size_bytes
+    effective_max_content_chars = settings.max_content_chars
+    if isinstance(max_content_chars, int) and max_content_chars >= 0:
+        effective_max_content_chars = max_content_chars
+
+    index = ContextSQLiteIndex(manager, context_path)
+    rebuild_summary: dict[str, Any] | None = None
+    should_auto_refresh = settings.enabled and effective_auto_index and (
+        not index.has_entries(mount_types=mount_types)
+        or (effective_auto_refresh and index.needs_refresh(mount_types=mount_types))
+    )
+    if refresh or should_auto_refresh:
+        summary = index.rebuild(
+            mount_types=mount_types,
+            include_content=settings.include_content,
+            max_file_size_bytes=effective_max_file_size_bytes,
+            max_content_chars=effective_max_content_chars,
+        )
+        rebuild_summary = summary.to_dict()
+
+    entries = index.query(
+        query=query,
+        mount_types=mount_types,
+        relative_prefix=relative_prefix,
+        limit=limit_value,
+        include_content=include_content,
+    )
+    payload: dict[str, Any] = {
+        "context_path": str(context_path),
+        "db_path": str(index.db_path),
+        "query": query,
+        "relative_prefix": relative_prefix or "",
+        "mount_types": [mount.value for mount in (mount_types or list(MountType))],
+        "count": len(entries),
+        "limit": limit_value,
+        "entries": entries,
+    }
+    if rebuild_summary:
+        payload["index_rebuild"] = rebuild_summary
+    return payload
 
 
 def _as_text_result(payload: dict[str, Any]) -> dict[str, Any]:
@@ -498,6 +606,7 @@ def _tool_context_init(arguments: dict[str, Any], manager: AFSManager) -> dict[s
 
     link_context = bool(arguments.get("link_context", False))
     force = bool(arguments.get("force", False))
+    _validate_context_init_scope(project_path, context_root=context_root, manager=manager)
 
     context = manager.init(
         path=project_path,
@@ -578,58 +687,28 @@ def _tool_context_query(arguments: dict[str, Any], manager: AFSManager) -> dict[
     if relative_prefix is not None and not isinstance(relative_prefix, str):
         raise ValueError("relative_prefix must be a string")
 
-    limit = _coerce_int(arguments.get("limit"), default=25, minimum=1, maximum=500)
     include_content = bool(arguments.get("include_content", False))
-    settings = _context_index_settings(manager)
-    auto_index = bool(arguments.get("auto_index", settings.auto_index))
-    auto_refresh = bool(arguments.get("auto_refresh", settings.auto_refresh))
+    auto_index = arguments.get("auto_index")
+    if auto_index is not None:
+        auto_index = bool(auto_index)
+    auto_refresh = arguments.get("auto_refresh")
+    if auto_refresh is not None:
+        auto_refresh = bool(auto_refresh)
     refresh = bool(arguments.get("refresh", False))
-    max_file_size_bytes = _coerce_int(
-        arguments.get("max_file_size_bytes"),
-        default=settings.max_file_size_bytes,
-        minimum=1024,
-    )
-    max_content_chars = _coerce_int(
-        arguments.get("max_content_chars"),
-        default=settings.max_content_chars,
-        minimum=0,
-    )
-
-    index = ContextSQLiteIndex(manager, context_path)
-    rebuild_summary: dict[str, Any] | None = None
-    should_auto_refresh = settings.enabled and auto_index and (
-        not index.has_entries(mount_types=mount_types)
-        or (auto_refresh and index.needs_refresh(mount_types=mount_types))
-    )
-    if refresh or should_auto_refresh:
-        summary = index.rebuild(
-            mount_types=mount_types,
-            include_content=settings.include_content,
-            max_file_size_bytes=max_file_size_bytes,
-            max_content_chars=max_content_chars,
-        )
-        rebuild_summary = summary.to_dict()
-
-    entries = index.query(
+    return _query_context_index(
+        context_path=context_path,
+        manager=manager,
         query=query_value,
         mount_types=mount_types,
         relative_prefix=relative_prefix,
-        limit=limit,
+        limit=_coerce_int(arguments.get("limit"), default=25, minimum=1, maximum=500),
         include_content=include_content,
+        auto_index=auto_index,
+        auto_refresh=auto_refresh,
+        refresh=refresh,
+        max_file_size_bytes=arguments.get("max_file_size_bytes"),
+        max_content_chars=arguments.get("max_content_chars"),
     )
-    payload: dict[str, Any] = {
-        "context_path": str(context_path),
-        "db_path": str(index.db_path),
-        "query": query_value,
-        "relative_prefix": relative_prefix or "",
-        "mount_types": [mount.value for mount in (mount_types or list(MountType))],
-        "count": len(entries),
-        "limit": limit,
-        "entries": entries,
-    }
-    if rebuild_summary:
-        payload["index_rebuild"] = rebuild_summary
-    return payload
 
 
 def _builtin_tool_definitions() -> list[MCPToolDefinition]:
@@ -1030,11 +1109,9 @@ def _list_resources(manager: AFSManager) -> list[dict[str, Any]]:
             "mimeType": "application/json",
         },
     ]
-    try:
-        contexts = discover_contexts(config=manager.config)
-    except Exception:
-        contexts = []
-    for ctx in contexts:
+    for ctx in _discover_allowed_contexts(manager):
+        if not _is_allowed_path(ctx.path, manager):
+            continue
         ctx_uri = f"afs://context/{ctx.path}"
         resources.append({
             "uri": f"{ctx_uri}/metadata",
@@ -1060,10 +1137,6 @@ def _list_resources(manager: AFSManager) -> list[dict[str, Any]]:
 def _read_resource(uri: str, manager: AFSManager) -> dict[str, Any]:
     """Read a single MCP resource by URI."""
     if uri == "afs://contexts":
-        try:
-            contexts = discover_contexts(config=manager.config)
-        except Exception:
-            contexts = []
         data = [
             {
                 "project": ctx.project_name,
@@ -1071,7 +1144,7 @@ def _read_resource(uri: str, manager: AFSManager) -> dict[str, Any]:
                 "valid": ctx.is_valid,
                 "mounts": ctx.total_mounts,
             }
-            for ctx in contexts
+            for ctx in _discover_allowed_contexts(manager)
         ]
         return {"uri": uri, "mimeType": "application/json", "text": json.dumps(data)}
 
@@ -1082,7 +1155,7 @@ def _read_resource(uri: str, manager: AFSManager) -> dict[str, Any]:
     remainder = uri[len(prefix):]
     if remainder.endswith("/metadata"):
         context_path_str = remainder[: -len("/metadata")]
-        context_path = Path(context_path_str).expanduser().resolve()
+        context_path = _resolve_explicit_allowed_context_path(context_path_str, manager)
         metadata_file = context_path / "metadata.json"
         if not metadata_file.exists():
             raise FileNotFoundError(f"metadata.json not found: {metadata_file}")
@@ -1091,7 +1164,7 @@ def _read_resource(uri: str, manager: AFSManager) -> dict[str, Any]:
 
     if remainder.endswith("/mounts"):
         context_path_str = remainder[: -len("/mounts")]
-        context_path = Path(context_path_str).expanduser().resolve()
+        context_path = _resolve_explicit_allowed_context_path(context_path_str, manager)
         ctx_root = manager.list_context(context_path=context_path)
         data: dict[str, Any] = {}
         for mount_type, mount_list in ctx_root.mounts.items():
@@ -1103,7 +1176,7 @@ def _read_resource(uri: str, manager: AFSManager) -> dict[str, Any]:
 
     if remainder.endswith("/index"):
         context_path_str = remainder[: -len("/index")]
-        context_path = Path(context_path_str).expanduser().resolve()
+        context_path = _resolve_explicit_allowed_context_path(context_path_str, manager)
         index = ContextSQLiteIndex(manager, context_path)
         has = index.has_entries()
         stale = index.needs_refresh() if has else False
@@ -1137,6 +1210,11 @@ def _list_prompts() -> list[dict[str, Any]]:
             "description": "Search the context index with a query",
             "arguments": [
                 {
+                    "name": "context_path",
+                    "description": "Path to .context root (uses configured default if omitted)",
+                    "required": False,
+                },
+                {
                     "name": "query",
                     "description": "Full-text search query",
                     "required": True,
@@ -1144,6 +1222,16 @@ def _list_prompts() -> list[dict[str, Any]]:
                 {
                     "name": "mount_types",
                     "description": "Comma-separated mount types to search (e.g. scratchpad,knowledge)",
+                    "required": False,
+                },
+                {
+                    "name": "relative_prefix",
+                    "description": "Optional relative path prefix filter",
+                    "required": False,
+                },
+                {
+                    "name": "limit",
+                    "description": "Optional result limit (default 25)",
                     "required": False,
                 },
             ],
@@ -1169,11 +1257,7 @@ def _get_prompt(
 ) -> list[dict[str, Any]]:
     """Build MCP prompt messages for a named prompt."""
     if name == "afs.context.overview":
-        raw_path = arguments.get("context_path")
-        if isinstance(raw_path, str) and raw_path.strip():
-            context_path = Path(raw_path).expanduser().resolve()
-        else:
-            context_path = manager.config.general.context_root
+        context_path = _resolve_prompt_context_path(arguments, manager)
         ctx_root = manager.list_context(context_path=context_path)
         lines = [
             f"# AFS Context: {ctx_root.project_name}",
@@ -1207,37 +1291,39 @@ def _get_prompt(
         mount_types: list[MountType] | None = None
         if isinstance(mount_types_raw, str) and mount_types_raw.strip():
             mount_types = [MountType(mt.strip()) for mt in mount_types_raw.split(",") if mt.strip()]
-
-        context_path = manager.config.general.context_root
-        index = ContextSQLiteIndex(manager, context_path)
-        if not index.has_entries(mount_types=mount_types):
-            settings = _context_index_settings(manager)
-            index.rebuild(
-                mount_types=mount_types,
-                include_content=settings.include_content,
-                max_file_size_bytes=settings.max_file_size_bytes,
-                max_content_chars=settings.max_content_chars,
-            )
-        entries = index.query(
-            query=query, mount_types=mount_types, limit=25, include_content=False
+        relative_prefix = arguments.get("relative_prefix")
+        if relative_prefix is not None and not isinstance(relative_prefix, str):
+            raise ValueError("relative_prefix must be a string")
+        context_path = _resolve_prompt_context_path(arguments, manager)
+        payload = _query_context_index(
+            context_path=context_path,
+            manager=manager,
+            query=query,
+            mount_types=mount_types,
+            relative_prefix=relative_prefix,
+            limit=_coerce_int(arguments.get("limit"), default=25, minimum=1, maximum=500),
         )
+        entries = payload["entries"]
         if entries:
             lines = [f"# Search results for: {query}", ""]
+            if payload.get("index_rebuild"):
+                lines.append("_Index refreshed before search._")
+                lines.append("")
             for entry in entries:
-                lines.append(
+                excerpt = entry.get("content_excerpt")
+                line = (
                     f"- **{entry['relative_path']}** ({entry['mount_type']}, "
                     f"{entry['size_bytes']} bytes)"
                 )
+                if isinstance(excerpt, str) and excerpt.strip():
+                    line += f": {excerpt}"
+                lines.append(line)
         else:
             lines = [f"No results found for: {query}"]
         return [{"role": "user", "content": {"type": "text", "text": "\n".join(lines)}}]
 
     if name == "afs.scratchpad.review":
-        raw_path = arguments.get("context_path")
-        if isinstance(raw_path, str) and raw_path.strip():
-            context_path = Path(raw_path).expanduser().resolve()
-        else:
-            context_path = manager.config.general.context_root
+        context_path = _resolve_prompt_context_path(arguments, manager)
 
         scratchpad_dir = context_path / "scratchpad"
         lines = [f"# Scratchpad Review: {context_path}", ""]

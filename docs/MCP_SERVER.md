@@ -2,6 +2,10 @@
 
 AFS provides a lightweight stdio MCP server for context operations.
 
+For Gemini CLI, prefer the MCP server from the repo or project root you want to
+work in. That keeps repo-local `context.init` available while preserving the
+allowed-root guardrails on all file and context operations.
+
 ## Run
 
 ```bash
@@ -54,8 +58,21 @@ In Antigravity, open `MCP Servers -> Manage MCP Servers -> View raw config`, the
 back to `LIKE` matching if FTS is unavailable on the host SQLite build.
 `fs.write`, `fs.delete`, and `fs.move` attempt incremental index sync so query
 results stay fresh without a full rebuild. With `auto_index=true` (default),
-`context.query` also auto-refreshes when it detects stale file-level snapshots
-(count/mtime mismatch).
+`context.query` also auto-refreshes when it detects stale path/content metadata
+via mount fingerprints, including external renames that keep file counts stable.
+
+Gemini-facing MCP prompts:
+
+- `afs.context.overview`
+- `afs.query.search`
+- `afs.scratchpad.review`
+
+Gemini-facing MCP resources:
+
+- `afs://contexts`
+- `afs://context/<path>/metadata`
+- `afs://context/<path>/mounts`
+- `afs://context/<path>/index`
 
 Index behavior can be tuned in `afs.toml`:
 
@@ -84,6 +101,11 @@ Path operations are scoped to:
 - configured `general.context_root`
 - local project `.context` under the current working directory
 
+`context.init` follows the same rule:
+
+- repo-local initialization is allowed when `project_path` is under the current working directory
+- centralized initialization is allowed when `context_root` is explicitly set under an allowed root
+
 ## Example Call Shape
 
 `tools/call` expects:
@@ -108,6 +130,21 @@ Rebuild and query the SQLite context index:
     "query": "Gemini",
     "limit": 20,
     "auto_index": true
+  }
+}
+```
+
+Prompt-oriented search for Gemini clients:
+
+```json
+{
+  "name": "afs.query.search",
+  "arguments": {
+    "context_path": "~/.context",
+    "query": "Gemini",
+    "mount_types": "scratchpad,knowledge",
+    "relative_prefix": "work",
+    "limit": 10
   }
 }
 ```
