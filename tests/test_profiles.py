@@ -105,3 +105,25 @@ def test_manager_applies_profile_mounts(tmp_path: Path) -> None:
     assert any(m.name.startswith("profile-knowledge-work") for m in knowledge_mounts)
     assert any(m.name.startswith("profile-skill-work") for m in tool_mounts)
     assert any(m.name.startswith("profile-registry-work") for m in global_mounts)
+
+
+def test_resolve_profile_does_not_auto_load_unrequested_extensions(tmp_path: Path) -> None:
+    ext_root = tmp_path / "extensions"
+    extension_dir = ext_root / "afs_google_test"
+    extension_dir.mkdir(parents=True)
+    (extension_dir / "knowledge").mkdir()
+    (extension_dir / "extension.toml").write_text(
+        "name = \"afs_google_test\"\n"
+        "knowledge_mounts = [\"knowledge\"]\n",
+        encoding="utf-8",
+    )
+
+    config = AFSConfig(
+        general=GeneralConfig(context_root=tmp_path / "context"),
+        extensions=ExtensionsConfig(extension_dirs=[ext_root], auto_discover=True),
+    )
+
+    resolved = resolve_active_profile(config)
+
+    assert resolved.enabled_extensions == []
+    assert resolved.knowledge_mounts == []

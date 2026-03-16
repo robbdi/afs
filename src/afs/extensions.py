@@ -256,6 +256,8 @@ def load_extensions(
     config: AFSConfig | ExtensionsConfig | dict | None = None,
     requested: list[str] | None = None,
     extra_dirs: list[Path] | None = None,
+    *,
+    allow_auto_discover: bool = True,
 ) -> dict[str, ExtensionManifest]:
     """Load enabled/requested extensions."""
     extension_config = resolve_extensions_config(config)
@@ -270,7 +272,7 @@ def load_extensions(
     )
 
     loaded: dict[str, ExtensionManifest] = {}
-    if extension_config.auto_discover and not requested_names:
+    if allow_auto_discover and extension_config.auto_discover and not requested_names:
         requested_names = sorted(manifests_by_name.keys())
 
     for name in requested_names:

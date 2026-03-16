@@ -38,11 +38,24 @@ def _build_context(tmp_path: Path) -> tuple[AFSConfig, Path]:
     return config, context_root
 
 
+def _clear_profile_env(monkeypatch) -> None:  # noqa: ANN001
+    for name in (
+        "AFS_PROFILE",
+        "AFS_ENABLED_EXTENSIONS",
+        "AFS_KNOWLEDGE_MOUNTS",
+        "AFS_SKILL_ROOTS",
+        "AFS_MODEL_REGISTRIES",
+        "AFS_POLICIES",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
 def test_status_command_json_reports_index_and_mount_counts(
     tmp_path: Path,
     monkeypatch,
     capsys,
 ) -> None:
+    _clear_profile_env(monkeypatch)
     config, context_root = _build_context(tmp_path)
 
     monkeypatch.setattr(config_module, "load_config_model", lambda *args, **kwargs: config)
@@ -62,6 +75,7 @@ def test_status_command_json_reports_index_and_mount_counts(
     assert payload["mount_counts"]["scratchpad"] == 1
     assert payload["mount_counts"]["knowledge"] == 1
     assert payload["total_files"] >= 2
+    assert payload["mount_health"]["healthy"] is True
     assert payload["index"]["available"] is True
     assert payload["index"]["has_entries"] is True
     assert payload["index"]["total_entries"] >= 1

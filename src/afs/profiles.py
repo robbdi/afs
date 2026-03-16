@@ -39,6 +39,15 @@ class ProfileApplyResult:
     skipped_missing: list[str]
 
 
+@dataclass(frozen=True)
+class ProfileMountSpec:
+    profile_name: str
+    mount_type: MountType
+    alias: str
+    source: Path
+    source_exists: bool
+
+
 def _as_env_paths(name: str) -> list[Path]:
     raw = os.environ.get(name, "").strip()
     if not raw:
@@ -143,7 +152,11 @@ def resolve_active_profile(
         _as_env_list("AFS_ENABLED_EXTENSIONS"),
     )
 
-    extension_manifests = load_extensions(config=config, requested=enabled_extensions)
+    extension_manifests = load_extensions(
+        config=config,
+        requested=enabled_extensions,
+        allow_auto_discover=False,
+    )
 
     extension_knowledge: list[Path] = []
     extension_skills: list[Path] = []
@@ -194,13 +207,36 @@ def _slug(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-") or "item"
 
 
+def list_profile_mount_specs(profile: ResolvedProfile) -> list[ProfileMountSpec]:
+    """Return the mount aliases AFS expects for a resolved profile."""
+    specs: list[ProfileMountSpec] = []
+    spec_groups = (
+        (MountType.KNOWLEDGE, KNOWLEDGE_ALIAS_PREFIX, profile.knowledge_mounts),
+        (MountType.TOOLS, SKILL_ALIAS_PREFIX, profile.skill_roots),
+        (MountType.GLOBAL, MODEL_ALIAS_PREFIX, profile.model_registries),
+    )
+    for mount_type, prefix, paths in spec_groups:
+        for idx, source in enumerate(paths):
+            source_path = source.expanduser().resolve()
+            alias = f"{prefix}{profile.name}-{idx}-{_slug(source_path.name)}"
+            specs.append(
+                ProfileMountSpec(
+                    profile_name=profile.name,
+                    mount_type=mount_type,
+                    alias=alias,
+                    source=source_path,
+                    source_exists=source_path.exists(),
+                )
+            )
+    return specs
+
+
 def _mount_profile_paths(
     manager: AFSManager,
     context_path: Path,
-    profile_name: str,
     mount_type: MountType,
     prefix: str,
-    paths: list[Path],
+    specs: list[ProfileMountSpec],
 ) -> tuple[int, list[str]]:
     mounted = 0
     skipped: list[str] = []
@@ -211,15 +247,18 @@ def _mount_profile_paths(
         if mount.name.startswith(prefix):
             manager.unmount(mount.name, mount_type, context_path=context_path)
 
-    for idx, source in enumerate(paths):
-        source_path = source.expanduser().resolve()
-        if not source_path.exists():
-            skipped.append(str(source_path))
+    for spec in specs:
+        if not spec.source_exists:
+            skipped.append(str(spec.source))
             continue
 
-        alias = f"{prefix}{profile_name}-{idx}-{_slug(source_path.name)}"
         try:
-            manager.mount(source_path, mount_type, alias=alias, context_path=context_path)
+            manager.mount(
+                spec.source,
+                mount_type,
+                alias=spec.alias,
+                context_path=context_path,
+            )
             mounted += 1
         except FileExistsError:
             continue
@@ -234,30 +273,28 @@ def apply_profile_mounts(
 ) -> ProfileApplyResult:
     """Apply profile-managed mounts into an existing context."""
     context_path = context_path.expanduser().resolve()
+    specs = list_profile_mount_specs(profile)
 
     knowledge_mounted, missing_knowledge = _mount_profile_paths(
         manager,
         context_path,
-        profile.name,
         MountType.KNOWLEDGE,
         KNOWLEDGE_ALIAS_PREFIX,
-        profile.knowledge_mounts,
+        [spec for spec in specs if spec.mount_type == MountType.KNOWLEDGE],
     )
     skills_mounted, missing_skills = _mount_profile_paths(
         manager,
         context_path,
-        profile.name,
         MountType.TOOLS,
         SKILL_ALIAS_PREFIX,
-        profile.skill_roots,
+        [spec for spec in specs if spec.mount_type == MountType.TOOLS],
     )
     registries_mounted, missing_registries = _mount_profile_paths(
         manager,
         context_path,
-        profile.name,
         MountType.GLOBAL,
         MODEL_ALIAS_PREFIX,
-        profile.model_registries,
+        [spec for spec in specs if spec.mount_type == MountType.GLOBAL],
     )
 
     return ProfileApplyResult(

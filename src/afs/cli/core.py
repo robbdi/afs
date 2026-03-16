@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 from ._utils import (
-    AFS_DIRS,
     build_config,
     ensure_context_root,
     resolve_studio_root,
@@ -416,23 +415,24 @@ def status_command(args: argparse.Namespace) -> int:
     """Show AFS status."""
     from ..config import load_config_model
     from ..core import find_root, resolve_context_root
+    from ..manager import AFSManager
     from ..models import MountType
 
     start_dir = Path(args.start_dir).expanduser().resolve() if args.start_dir else None
     root = find_root(start_dir)
     config = load_config_model()
     context_root = resolve_context_root(config, root)
+    manager = AFSManager(config=config)
 
-    missing = []
-    for name in AFS_DIRS:
-        if not (context_root / name).exists():
-            missing.append(name)
+    mount_health = manager.context_health(context_root)
+
+    missing = list(mount_health["missing_dirs"])
 
     # Gather mount counts
     mount_counts: dict[str, int] = {}
     total_files = 0
     for mount_type in MountType:
-        mount_dir = context_root / mount_type.value
+        mount_dir = manager.resolve_mount_root(context_root, mount_type)
         count = _count_mount_files(mount_dir)
         if count > 0:
             mount_counts[mount_type.value] = count
@@ -440,13 +440,10 @@ def status_command(args: argparse.Namespace) -> int:
 
     # Gather index stats
     index_stats: dict[str, Any] = {"available": False}
-    db_path = context_root / "global" / config.context_index.db_filename
+    db_path = manager.resolve_mount_root(context_root, MountType.GLOBAL) / config.context_index.db_filename
     if config.context_index.enabled and db_path.exists():
         try:
             from ..context_index import ContextSQLiteIndex
-            from ..manager import AFSManager
-
-            manager = AFSManager(config=config)
             index = ContextSQLiteIndex(manager, context_root)
             has_entries = index.has_entries()
             index_stats = {
@@ -472,6 +469,7 @@ def status_command(args: argparse.Namespace) -> int:
             "active_profile": active_profile,
             "mount_counts": mount_counts,
             "total_files": total_files,
+            "mount_health": mount_health,
             "index": index_stats,
         }
         print(json.dumps(payload, indent=2))
@@ -493,6 +491,24 @@ def status_command(args: argparse.Namespace) -> int:
     else:
         print("  mounts: (empty)")
     print()
+
+    mount_issues = []
+    if mount_health["broken_mounts"]:
+        mount_issues.append(f"broken={len(mount_health['broken_mounts'])}")
+    if mount_health["duplicate_mount_sources"]:
+        mount_issues.append(f"duplicates={len(mount_health['duplicate_mount_sources'])}")
+    profile_info = mount_health["profile"]
+    if profile_info["missing_mounts"]:
+        mount_issues.append(f"profile_missing={len(profile_info['missing_mounts'])}")
+    if profile_info["missing_sources"]:
+        mount_issues.append(f"profile_sources_missing={len(profile_info['missing_sources'])}")
+    if profile_info["mismatched_mounts"]:
+        mount_issues.append(f"profile_mismatched={len(profile_info['mismatched_mounts'])}")
+    if mount_issues:
+        print("  mount_health: " + ", ".join(mount_issues))
+        if mount_health["suggested_actions"]:
+            print("  actions:     " + "; ".join(mount_health["suggested_actions"]))
+        print()
 
     # Index summary
     if index_stats.get("available"):

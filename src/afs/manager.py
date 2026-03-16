@@ -6,12 +6,17 @@ import json
 import shutil
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from .config import load_config_model
 from .history import log_event
 from .mapping import resolve_directory_map, resolve_directory_name
 from .models import ContextRoot, MountPoint, MountType, ProjectMetadata
-from .profiles import apply_profile_mounts, resolve_active_profile
+from .profiles import (
+    apply_profile_mounts,
+    list_profile_mount_specs,
+    resolve_active_profile,
+)
 from .schema import AFSConfig, DirectoryConfig
 
 
@@ -149,13 +154,20 @@ class AFSManager:
             afs_directories=self._directories,
             metadata=metadata,
         )
-        alias = alias or source.name
+        alias = self._normalize_mount_alias(alias or source.name)
         destination = context_path / directory_name / alias
 
         if destination.exists():
             raise FileExistsError(
                 f"Mount point '{alias}' already exists in {mount_type.value}"
             )
+
+        existing = self.list_context(context_path=context_path)
+        for mount in existing.get_mounts(mount_type):
+            if mount.is_symlink and mount.source == source:
+                raise FileExistsError(
+                    f"Source {source} is already mounted in {mount_type.value} as '{mount.name}'"
+                )
 
         destination.symlink_to(source)
         log_event(
@@ -271,6 +283,184 @@ class AFSManager:
 
         if context_path.exists():
             self._remove_context_path(context_path)
+
+    def apply_profile(
+        self,
+        context_path: Path | None = None,
+        *,
+        profile_name: str | None = None,
+    ):
+        if context_path is None:
+            context_path = Path(".") / self.CONTEXT_DIR_DEFAULT
+        context_path = context_path.expanduser().resolve()
+
+        resolved_profile = resolve_active_profile(self.config, profile_name=profile_name)
+        result = apply_profile_mounts(self, context_path, resolved_profile)
+        log_event(
+            "context",
+            "afs.manager",
+            op="apply_profile",
+            context_root=context_path,
+            metadata={
+                "profile": result.profile_name,
+                "context_path": str(context_path),
+                "mounted": result.mounted,
+                "missing": result.skipped_missing,
+                "policies": resolved_profile.policies,
+                "extensions": resolved_profile.enabled_extensions,
+            },
+        )
+        return result
+
+    def context_health(
+        self,
+        context_path: Path | None = None,
+        *,
+        profile_name: str | None = None,
+    ) -> dict[str, Any]:
+        if context_path is None:
+            context_path = Path(".") / self.CONTEXT_DIR_DEFAULT
+        context_path = context_path.expanduser().resolve()
+
+        context = self.list_context(context_path=context_path)
+        directory_map = resolve_directory_map(
+            afs_directories=self._directories,
+            metadata=context.metadata,
+        )
+        missing_dirs = [
+            mount_type.value
+            for mount_type in MountType
+            if not (context_path / directory_map.get(mount_type, mount_type.value)).exists()
+        ]
+
+        actual_symlink_mounts: dict[MountType, dict[str, MountPoint]] = {
+            mount_type: {} for mount_type in MountType
+        }
+        broken_mounts: list[dict[str, str]] = []
+        duplicate_mount_sources: list[dict[str, Any]] = []
+        symlink_sources: dict[tuple[MountType, str], list[str]] = {}
+
+        for mount_type in MountType:
+            for mount in context.get_mounts(mount_type):
+                if not mount.is_symlink:
+                    continue
+                actual_symlink_mounts[mount_type][mount.name] = mount
+                source_key = (mount_type, str(mount.source))
+                symlink_sources.setdefault(source_key, []).append(mount.name)
+                if not mount.source.exists():
+                    broken_mounts.append(
+                        {
+                            "name": mount.name,
+                            "mount_type": mount_type.value,
+                            "source": str(mount.source),
+                        }
+                    )
+
+        for (mount_type, source), aliases in sorted(symlink_sources.items(), key=lambda item: item[0][1]):
+            unique_aliases = sorted(set(aliases))
+            if len(unique_aliases) < 2:
+                continue
+            duplicate_mount_sources.append(
+                {
+                    "mount_type": mount_type.value,
+                    "source": source,
+                    "aliases": unique_aliases,
+                }
+            )
+
+        resolved_profile = resolve_active_profile(self.config, profile_name=profile_name)
+        profile_missing_mounts: list[dict[str, str]] = []
+        profile_missing_sources: list[dict[str, str]] = []
+        profile_mismatched_mounts: list[dict[str, str]] = []
+        for spec in list_profile_mount_specs(resolved_profile):
+            if not spec.source_exists:
+                profile_missing_sources.append(
+                    {
+                        "mount_type": spec.mount_type.value,
+                        "alias": spec.alias,
+                        "source": str(spec.source),
+                    }
+                )
+                continue
+            actual = actual_symlink_mounts.get(spec.mount_type, {}).get(spec.alias)
+            if actual is None:
+                profile_missing_mounts.append(
+                    {
+                        "mount_type": spec.mount_type.value,
+                        "alias": spec.alias,
+                        "source": str(spec.source),
+                    }
+                )
+                continue
+            if actual.source != spec.source:
+                profile_mismatched_mounts.append(
+                    {
+                        "mount_type": spec.mount_type.value,
+                        "alias": spec.alias,
+                        "expected_source": str(spec.source),
+                        "actual_source": str(actual.source),
+                    }
+                )
+
+        actions: list[str] = []
+        if broken_mounts:
+            actions.append("remove or repair broken symlink mounts")
+        if duplicate_mount_sources:
+            actions.append("deduplicate mounts that point to the same source")
+        if profile_missing_mounts or profile_mismatched_mounts:
+            actions.append("reapply profile-managed mounts")
+        if profile_missing_sources:
+            actions.append("restore or update missing profile source paths")
+
+        return {
+            "healthy": not (
+                missing_dirs
+                or broken_mounts
+                or duplicate_mount_sources
+                or profile_missing_mounts
+                or profile_missing_sources
+                or profile_mismatched_mounts
+            ),
+            "missing_dirs": missing_dirs,
+            "symlink_mounts": sum(len(mounts) for mounts in actual_symlink_mounts.values()),
+            "broken_mounts": broken_mounts,
+            "duplicate_mount_sources": duplicate_mount_sources,
+            "profile": {
+                "name": resolved_profile.name,
+                "managed_mounts": len(list_profile_mount_specs(resolved_profile)),
+                "missing_mounts": profile_missing_mounts,
+                "missing_sources": profile_missing_sources,
+                "mismatched_mounts": profile_mismatched_mounts,
+            },
+            "suggested_actions": actions,
+        }
+
+    def rebuild_context_index(
+        self,
+        context_path: Path | None = None,
+        *,
+        mount_types: list[MountType] | None = None,
+    ) -> dict[str, Any]:
+        if context_path is None:
+            context_path = Path(".") / self.CONTEXT_DIR_DEFAULT
+        context_path = context_path.expanduser().resolve()
+        settings = self.config.context_index
+        if not settings.enabled:
+            return {"enabled": False, "rebuilt": False}
+
+        from .context_index import ContextSQLiteIndex
+
+        index = ContextSQLiteIndex(self, context_path)
+        summary = index.rebuild(
+            mount_types=mount_types,
+            include_content=settings.include_content,
+            max_file_size_bytes=settings.max_file_size_bytes,
+            max_content_chars=settings.max_content_chars,
+        )
+        payload = summary.to_dict()
+        payload["enabled"] = True
+        payload["rebuilt"] = True
+        return payload
 
     def update_metadata(
         self,
@@ -438,23 +628,18 @@ class AFSManager:
     def _apply_profile_mounts(self, context_path: Path, profile_name: str | None) -> None:
         if not self.config.profiles.auto_apply and not profile_name:
             return
+        self.apply_profile(context_path, profile_name=profile_name)
 
-        resolved_profile = resolve_active_profile(self.config, profile_name=profile_name)
-        result = apply_profile_mounts(self, context_path, resolved_profile)
-        log_event(
-            "context",
-            "afs.manager",
-            op="apply_profile",
-            context_root=context_path,
-            metadata={
-                "profile": result.profile_name,
-                "context_path": str(context_path),
-                "mounted": result.mounted,
-                "missing": result.skipped_missing,
-                "policies": resolved_profile.policies,
-                "extensions": resolved_profile.enabled_extensions,
-            },
-        )
+    def _normalize_mount_alias(self, alias: str) -> str:
+        value = alias.strip()
+        if not value:
+            raise ValueError("mount alias must be a non-empty simple name")
+        candidate = Path(value)
+        if candidate.name != value or value in {".", ".."}:
+            raise ValueError("mount alias must be a simple name without path separators")
+        if "/" in value or "\\" in value:
+            raise ValueError("mount alias must be a simple name without path separators")
+        return value
 
     def _ensure_link(self, link_path: Path, target: Path, force: bool) -> None:
         if link_path.is_symlink():

@@ -750,12 +750,13 @@ def _tool_context_status(arguments: dict[str, Any], manager: AFSManager) -> dict
     """Return a summary of the context: mounts, index health, profile."""
     context_path = _resolve_context_path(arguments, manager)
     settings = _context_index_settings(manager)
+    mount_health = manager.context_health(context_path)
 
     # Mount counts
     mount_counts: dict[str, int] = {}
     total_files = 0
     for mount_type in MountType:
-        mount_dir = context_path / mount_type.value
+        mount_dir = manager.resolve_mount_root(context_path, mount_type)
         if not mount_dir.exists():
             continue
         count = count_mount_files(mount_dir)
@@ -766,7 +767,7 @@ def _tool_context_status(arguments: dict[str, Any], manager: AFSManager) -> dict
     # Index stats
     index_info: dict[str, Any] = {"enabled": settings.enabled}
     if settings.enabled:
-        db_path = context_path / "global" / settings.db_filename
+        db_path = manager.resolve_mount_root(context_path, MountType.GLOBAL) / settings.db_filename
         if db_path.exists():
             try:
                 index = ContextSQLiteIndex(manager, context_path)
@@ -785,6 +786,8 @@ def _tool_context_status(arguments: dict[str, Any], manager: AFSManager) -> dict
         "profile": manager.config.profiles.active_profile,
         "mount_counts": mount_counts,
         "total_files": total_files,
+        "mount_health": mount_health,
+        "actions": mount_health["suggested_actions"],
         "index": index_info,
     }
 

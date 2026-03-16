@@ -18,6 +18,13 @@ def test_gemini_workspace_brief_service_uses_agent_entrypoint() -> None:
     assert "afs.agents.gemini_workspace_brief" in definition.command
 
 
+def test_context_warm_service_rebuilds_stale_indexes() -> None:
+    manager = ServiceManager(config=AFSConfig(), platform_name="linux")
+    definition = manager.get_definition("context-warm")
+    assert definition is not None
+    assert "--rebuild-stale-indexes" in definition.command
+
+
 def test_service_config_can_disable_service() -> None:
     services = ServicesConfig(
         enabled=True,

@@ -43,6 +43,20 @@ def collect_afs_health(config_path: Path | None = None) -> dict[str, Any]:
 
     mounts: dict[str, int] = {}
     total_mounts = 0
+    mount_health: dict[str, Any] = {
+        "healthy": False,
+        "missing_dirs": [],
+        "broken_mounts": [],
+        "duplicate_mount_sources": [],
+        "profile": {
+            "name": profile.name,
+            "managed_mounts": 0,
+            "missing_mounts": [],
+            "missing_sources": [],
+            "mismatched_mounts": [],
+        },
+        "suggested_actions": [],
+    }
     if context_root.exists():
         try:
             context = manager.list_context(context_path=context_root)
@@ -51,6 +65,7 @@ def collect_afs_health(config_path: Path | None = None) -> dict[str, Any]:
                 for mount_type, items in context.mounts.items()
             }
             total_mounts = context.total_mounts
+            mount_health = manager.context_health(context_root, profile_name=profile.name)
         except Exception:
             mounts = {}
 
@@ -73,6 +88,7 @@ def collect_afs_health(config_path: Path | None = None) -> dict[str, Any]:
             "exists": context_root.exists(),
             "total_mounts": total_mounts,
             "mounts": mounts,
+            "mount_health": mount_health,
         },
         "monorepo_bridge": {
             "path": str(bridge_status.path),
@@ -111,6 +127,34 @@ def render_afs_health(snapshot: dict[str, Any]) -> str:
         lines.append(f"mount_breakdown: {mount_pairs}")
     else:
         lines.append("mount_breakdown: (none)")
+
+    mount_health = context["mount_health"]
+    mount_health_parts: list[str] = []
+    if mount_health["broken_mounts"]:
+        mount_health_parts.append(f"broken={len(mount_health['broken_mounts'])}")
+    if mount_health["duplicate_mount_sources"]:
+        mount_health_parts.append(
+            f"duplicates={len(mount_health['duplicate_mount_sources'])}"
+        )
+    profile_health = mount_health["profile"]
+    if profile_health["missing_mounts"]:
+        mount_health_parts.append(
+            f"profile_missing={len(profile_health['missing_mounts'])}"
+        )
+    if profile_health["missing_sources"]:
+        mount_health_parts.append(
+            f"profile_sources_missing={len(profile_health['missing_sources'])}"
+        )
+    if profile_health["mismatched_mounts"]:
+        mount_health_parts.append(
+            f"profile_mismatched={len(profile_health['mismatched_mounts'])}"
+        )
+    lines.append(
+        "mount_health: "
+        + (", ".join(mount_health_parts) if mount_health_parts else "ok")
+    )
+    if mount_health["suggested_actions"]:
+        lines.append("mount_actions: " + "; ".join(mount_health["suggested_actions"]))
 
     bridge_age = _format_age(bridge["age_seconds"])
     lines.append(

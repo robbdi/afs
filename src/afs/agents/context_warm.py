@@ -10,9 +10,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..cli._utils import write_config
+from ..context_index import ContextSQLiteIndex
 from ..core import resolve_context_root
 from ..discovery import discover_contexts, get_project_stats
 from ..embeddings import build_embedding_index, create_ollama_embed_fn
+from ..manager import AFSManager
 from ..workspace_sync import load_workspace_entries, resolve_config_output, sync_workspace_config
 from .base import (
     AgentResult,
@@ -57,6 +59,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-workspace-sync", action="store_true", help="Skip workspace sync.")
     parser.add_argument("--skip-discover", action="store_true", help="Skip context discovery.")
     parser.add_argument("--skip-embeddings", action="store_true", help="Skip embedding refresh.")
+    parser.add_argument(
+        "--skip-context-audit",
+        action="store_true",
+        help="Skip context mount/index audit.",
+    )
+    parser.add_argument(
+        "--repair-profile-mounts",
+        action="store_true",
+        help="Reapply managed profile mounts for contexts with broken or missing managed mounts.",
+    )
+    parser.add_argument(
+        "--rebuild-stale-indexes",
+        action="store_true",
+        help="Rebuild empty or stale SQLite indexes for audited contexts.",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Do not write config updates.")
     parser.add_argument(
         "--embedding-config",
@@ -250,6 +267,125 @@ def _load_embedding_projects(path: Path) -> list[EmbeddingProject]:
     return projects
 
 
+def _resolve_audit_context_paths(
+    config,
+    discovered_contexts: list[dict[str, object]] | None,
+) -> list[Path]:
+    paths: list[Path] = []
+    seen: set[str] = set()
+    for entry in discovered_contexts or []:
+        raw = entry.get("path")
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        candidate = Path(raw).expanduser().resolve()
+        marker = str(candidate)
+        if marker in seen or not candidate.exists():
+            continue
+        seen.add(marker)
+        paths.append(candidate)
+
+    if paths:
+        return paths
+
+    candidate = resolve_context_root(config, None)
+    if candidate.exists():
+        return [candidate]
+    return []
+
+
+def _audit_contexts(
+    config,
+    context_paths: list[Path],
+    *,
+    repair_profile_mounts: bool = False,
+    rebuild_stale_indexes: bool = False,
+) -> tuple[list[dict[str, object]], dict[str, int], list[str]]:
+    manager = AFSManager(config=config)
+    audits: list[dict[str, object]] = []
+    notes: list[str] = []
+    metrics = {
+        "contexts_audited": 0,
+        "contexts_with_mount_issues": 0,
+        "contexts_with_broken_mounts": 0,
+        "contexts_with_stale_indexes": 0,
+        "profile_repairs": 0,
+        "indexes_rebuilt": 0,
+    }
+
+    for context_path in context_paths:
+        health = manager.context_health(context_path)
+
+        audit: dict[str, object] = {
+            "context_path": str(context_path),
+            "mount_health": health,
+        }
+
+        if repair_profile_mounts and (
+            health["broken_mounts"]
+            or health["profile"]["missing_mounts"]
+            or health["profile"]["mismatched_mounts"]
+        ):
+            result = manager.apply_profile(context_path)
+            metrics["profile_repairs"] += 1
+            health = manager.context_health(context_path)
+            audit["profile_repair"] = {
+                "profile": result.profile_name,
+                "mounted": result.mounted,
+                "missing": result.skipped_missing,
+            }
+            audit["mount_health"] = health
+
+        issue_count = (
+            len(health["broken_mounts"])
+            + len(health["duplicate_mount_sources"])
+            + len(health["profile"]["missing_mounts"])
+            + len(health["profile"]["missing_sources"])
+            + len(health["profile"]["mismatched_mounts"])
+        )
+        if issue_count:
+            metrics["contexts_with_mount_issues"] += 1
+        if health["broken_mounts"]:
+            metrics["contexts_with_broken_mounts"] += 1
+
+        index_info: dict[str, object] = {"enabled": config.context_index.enabled}
+        if config.context_index.enabled:
+            index = ContextSQLiteIndex(manager, context_path)
+            has_entries = index.has_entries()
+            stale = index.needs_refresh() if has_entries else True
+            if stale:
+                metrics["contexts_with_stale_indexes"] += 1
+            index_info.update(
+                {
+                    "has_entries": has_entries,
+                    "stale": stale,
+                    "total_entries": index.total_entries,
+                }
+            )
+            if rebuild_stale_indexes and stale:
+                index_info["rebuild"] = manager.rebuild_context_index(context_path)
+                metrics["indexes_rebuilt"] += 1
+                refreshed = ContextSQLiteIndex(manager, context_path)
+                index_info["has_entries"] = refreshed.has_entries()
+                index_info["stale"] = (
+                    refreshed.needs_refresh() if index_info["has_entries"] else True
+                )
+                index_info["total_entries"] = refreshed.total_entries
+        audit["index"] = index_info
+
+        if issue_count:
+            notes.append(
+                f"{context_path.name}: "
+                f"broken={len(health['broken_mounts'])}, "
+                f"duplicates={len(health['duplicate_mount_sources'])}, "
+                f"profile_missing={len(health['profile']['missing_mounts'])}, "
+                f"profile_sources_missing={len(health['profile']['missing_sources'])}"
+            )
+        audits.append(audit)
+        metrics["contexts_audited"] += 1
+
+    return audits, metrics, notes
+
+
 def run(args: argparse.Namespace) -> int:
     configure_logging(args.quiet)
     config = load_agent_config(args.config)
@@ -284,6 +420,21 @@ def run(args: argparse.Namespace) -> int:
             payload["embedding_results"] = embedding_results
             metrics["embedding_projects"] = len(embedding_results)
             notes.extend(embed_notes)
+
+        if not args.skip_context_audit:
+            context_paths = _resolve_audit_context_paths(
+                config,
+                payload.get("contexts") if isinstance(payload.get("contexts"), list) else None,
+            )
+            audits, audit_metrics, audit_notes = _audit_contexts(
+                config,
+                context_paths,
+                repair_profile_mounts=args.repair_profile_mounts,
+                rebuild_stale_indexes=args.rebuild_stale_indexes,
+            )
+            payload["context_health"] = audits
+            metrics.update(audit_metrics)
+            notes.extend(audit_notes)
 
         result = AgentResult(
             name=AGENT_NAME,

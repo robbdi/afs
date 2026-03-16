@@ -140,6 +140,8 @@ class ContextSQLiteIndex:
                 continue
 
             for entry, relative_path in _iter_mount_entries(mount_root):
+                if self._should_skip_relative_path(mount_type, relative_path):
+                    continue
                 try:
                     row, reason = self._build_row(
                         mount_type,
@@ -470,6 +472,8 @@ class ContextSQLiteIndex:
             # Build filesystem snapshot: relative_path -> (size, mtime)
             fs_entries: dict[str, tuple[int, str]] = {}
             for entry, relative_path in _iter_mount_entries(mount_root):
+                if self._should_skip_relative_path(mount_type, relative_path):
+                    continue
                 try:
                     stat = entry.stat()
                     mtime = _iso_utc(stat.st_mtime)
@@ -743,6 +747,8 @@ class ContextSQLiteIndex:
                 continue
 
             for entry, relative_path in _iter_mount_entries(mount_root):
+                if self._should_skip_relative_path(mount_type, relative_path):
+                    continue
                 try:
                     stat = entry.stat()
                 except OSError:
@@ -764,6 +770,18 @@ class ContextSQLiteIndex:
                 fingerprint=fingerprint.hexdigest(),
             )
         return snapshot
+
+    def _should_skip_relative_path(self, mount_type: MountType, relative_path: str) -> bool:
+        if mount_type != MountType.GLOBAL:
+            return False
+        db_name = self._db_path.name
+        ignored = {
+            db_name,
+            f"{db_name}-journal",
+            f"{db_name}-shm",
+            f"{db_name}-wal",
+        }
+        return relative_path in ignored
 
     def _indexed_snapshot(
         self,

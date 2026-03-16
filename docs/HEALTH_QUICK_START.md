@@ -12,6 +12,7 @@ This reports:
 
 - active profile
 - context path and mount counts
+- mount health: broken symlinks, duplicate sources, missing profile-managed mounts
 - monorepo bridge freshness
 - embedding index age summary
 - extension/hook status
@@ -48,5 +49,7 @@ This reports:
 
 1. Run `./scripts/afs health`.
 2. If profile or mounts look wrong, run `./scripts/afs profile current` and `./scripts/afs context profile-show`.
-3. If monorepo bridge is stale, refresh `monorepo/active_workspace.toml` via workspace switch hook.
-4. If MCP tools look wrong, check `./scripts/afs mcp serve` and extension `[mcp_tools]` config.
+3. If `mount_health` reports broken or missing managed mounts, run `./scripts/afs services start context-warm` or rerun `context-warm` with `--repair-profile-mounts`.
+4. If SQLite index health is stale, rebuild with `./scripts/afs mcp serve` plus `context.index.rebuild`, or let the `context-warm` service handle it.
+5. If monorepo bridge is stale, refresh `monorepo/active_workspace.toml` via workspace switch hook.
+6. If MCP tools look wrong, check `./scripts/afs mcp serve` and extension `[mcp_tools]` config.

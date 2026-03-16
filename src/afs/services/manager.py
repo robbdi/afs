@@ -34,6 +34,11 @@ def _resolve_interval_env(name: str, *, default: int) -> int:
     return value if value > 0 else default
 
 
+def _resolve_bool_env(name: str) -> bool:
+    raw = os.environ.get(name, "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 class ServiceManager:
     """Build and render service definitions without mutating the system."""
 
@@ -430,7 +435,10 @@ class ServiceManager:
             str(context_warm_report),
             "--interval",
             str(context_warm_interval),
+            "--rebuild-stale-indexes",
         ]
+        if _resolve_bool_env("AFS_CONTEXT_WARM_REPAIR_PROFILE_MOUNTS"):
+            context_warm_command.append("--repair-profile-mounts")
         gemini_workspace_brief_command = [
             python,
             "-m",

@@ -81,7 +81,7 @@ Useful Gemini-oriented MCP operations:
 
 - `context.query` for indexed path/content search
 - `context.diff` for “what changed since the last index build”
-- `context.status` for mount counts, profile, and index health
+- `context.status` for mount counts, mount health, profile, and index health
 
 Gemini work-root override:
 
@@ -95,7 +95,14 @@ Gemini brief agent:
 ./scripts/afs agents run gemini-workspace-brief --stdout
 ./scripts/afs services start gemini-workspace-brief
 ./scripts/afs agents run claude-orchestrator --prompt "Summarize this repo"
+./scripts/afs services start context-warm
 ```
+
+`context-warm` now audits each discovered context for broken symlink mounts,
+duplicate mount targets, missing profile-managed mounts, and stale SQLite
+indexes. The built-in service runs with `--rebuild-stale-indexes` by default.
+Set `AFS_CONTEXT_WARM_REPAIR_PROFILE_MOUNTS=1` to let the service reapply
+managed profile mounts automatically when they drift.
 
 Codex MCP config:
 
@@ -114,4 +121,6 @@ args = ["mcp", "serve"]
 ```
 
 `afs health` reports AFS MCP registration for Gemini, Claude, and Codex, and it
-detects both `python -m afs.mcp_server` and `afs mcp serve` processes.
+detects both `python -m afs.mcp_server` and `afs mcp serve` processes. It also
+reports broken mounts, duplicate mount targets, and missing profile-managed
+mounts so you can see context drift without opening the directory manually.

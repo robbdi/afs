@@ -17,13 +17,15 @@ from afs.schema import (
 
 def _make_manager(tmp_path: Path) -> AFSManager:
     context_root = tmp_path / "context"
-    context_root.mkdir(parents=True)
-    (context_root / "scratchpad").mkdir()
     general = GeneralConfig(
         context_root=context_root,
         agent_workspaces_dir=context_root / "workspaces",
     )
-    return AFSManager(config=AFSConfig(general=general))
+    manager = AFSManager(config=AFSConfig(general=general))
+    project_path = tmp_path / "project"
+    project_path.mkdir()
+    manager.ensure(path=project_path, context_root=context_root)
+    return manager
 
 
 def test_tools_list_returns_afs_tools(tmp_path: Path) -> None:
@@ -434,7 +436,16 @@ def test_context_query_tool_auto_indexes(tmp_path: Path) -> None:
     assert "index_rebuild" in structured
 
 
-def test_context_status_and_diff_tools(tmp_path: Path) -> None:
+def test_context_status_and_diff_tools(tmp_path: Path, monkeypatch) -> None:
+    for name in (
+        "AFS_PROFILE",
+        "AFS_ENABLED_EXTENSIONS",
+        "AFS_KNOWLEDGE_MOUNTS",
+        "AFS_SKILL_ROOTS",
+        "AFS_MODEL_REGISTRIES",
+        "AFS_POLICIES",
+    ):
+        monkeypatch.delenv(name, raising=False)
     manager = _make_manager(tmp_path)
     context_root = manager.config.general.context_root
     notes_dir = context_root / "scratchpad"
@@ -479,6 +490,8 @@ def test_context_status_and_diff_tools(tmp_path: Path) -> None:
     status_structured = status_response["result"]["structuredContent"]
     assert status_structured["mount_counts"]["scratchpad"] >= 1
     assert status_structured["mount_counts"]["knowledge"] == 1
+    assert status_structured["mount_health"]["healthy"] is True
+    assert status_structured["actions"] == []
     assert status_structured["index"]["enabled"] is True
     assert status_structured["index"]["has_entries"] is True
     assert status_structured["index"]["total_entries"] >= 1

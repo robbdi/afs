@@ -158,6 +158,24 @@ The brief agent writes JSON and Markdown summaries under
 `GOOGLE_API_KEY`. `claude-orchestrator` is now a built-in agent surface and can
 be listed with `afs agents list`.
 
+`context-warm` is the background maintenance surface for contexts:
+
+```bash
+~/src/lab/afs/scripts/afs agents run context-warm --stdout
+~/src/lab/afs/scripts/afs services start context-warm
+```
+
+Each run now audits discovered contexts for:
+
+- broken symlink mounts
+- duplicate aliases that point at the same source
+- missing or mismatched profile-managed mounts
+- empty or stale SQLite indexes
+
+The built-in `context-warm` service rebuilds stale indexes automatically. Set
+`AFS_CONTEXT_WARM_REPAIR_PROFILE_MOUNTS=1` if you also want it to reapply
+profile-managed mounts when they drift.
+
 ## Gemini / Claude / Codex Registration
 
 Recommended command target:
@@ -203,5 +221,6 @@ Antigravity raw config example:
 If the client requires a Python module entrypoint instead, use a Python
 environment where `afs` is installed and run `python3 -m afs.mcp_server`.
 
-`afs health` checks Gemini, Claude, and Codex registration files and also
-recognizes wrapper-style `afs mcp serve` processes.
+`afs health` checks Gemini, Claude, and Codex registration files, recognizes
+wrapper-style `afs mcp serve` processes, and surfaces context mount drift such
+as broken symlinks and missing profile-managed mounts.

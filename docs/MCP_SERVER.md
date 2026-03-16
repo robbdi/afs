@@ -160,21 +160,29 @@ export AFS_MCP_ALLOWED_ROOTS=/google
 ```
 
 `context.diff` reports added, modified, and deleted files relative to the last
-index build. `context.status` reports mount counts, index health, and the active
-profile for the target context.
+index build. `context.status` reports mount counts, mount health, index health,
+the active profile, and suggested repair actions for the target context.
 
 Gemini background brief surfaces:
 
 ```bash
 ~/src/lab/afs/scripts/afs agents run gemini-workspace-brief --stdout
 ~/src/lab/afs/scripts/afs services start gemini-workspace-brief
+~/src/lab/afs/scripts/afs services start context-warm
 ```
 
 The brief agent requires `GEMINI_API_KEY` or `GOOGLE_API_KEY`.
 
+`context-warm` now audits discovered contexts for broken symlink mounts,
+duplicate mount targets, missing profile-managed mounts, and stale indexes. The
+built-in service runs with `--rebuild-stale-indexes` by default. Set
+`AFS_CONTEXT_WARM_REPAIR_PROFILE_MOUNTS=1` to let it reapply profile-managed
+mounts automatically.
+
 `afs health` now reports AFS MCP registration across Gemini, Claude, and Codex
 config surfaces, and it recognizes both `python -m afs.mcp_server` and
-wrapper-style `afs mcp serve` processes.
+wrapper-style `afs mcp serve` processes. It also surfaces context mount drift so
+agents can distinguish path access problems from index staleness quickly.
 
 ## Example Call Shape
 
