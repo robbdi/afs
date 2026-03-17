@@ -46,3 +46,32 @@ def test_discover_and_load_extension_manifest(tmp_path: Path) -> None:
     assert manifest.mcp_tools_factory == "register_mcp_tools"
     assert manifest.mcp_server_module == "afs_google_test.server"
     assert manifest.mcp_server_factory == "register_mcp_server"
+
+
+def test_discover_extension_prefers_earlier_directories(tmp_path: Path) -> None:
+    work_root = tmp_path / "work-exts"
+    user_root = tmp_path / "user-exts"
+    work_ext = work_root / "shared"
+    user_ext = user_root / "shared"
+    work_ext.mkdir(parents=True)
+    user_ext.mkdir(parents=True)
+    (work_ext / "extension.toml").write_text(
+        "name = \"shared\"\n"
+        "description = \"work\"\n"
+        "cli_modules = [\"work.cli\"]\n",
+        encoding="utf-8",
+    )
+    (user_ext / "extension.toml").write_text(
+        "name = \"shared\"\n"
+        "description = \"user\"\n"
+        "cli_modules = [\"user.cli\"]\n",
+        encoding="utf-8",
+    )
+
+    config = ExtensionsConfig(
+        enabled_extensions=["shared"],
+        extension_dirs=[work_root, user_root],
+    )
+    loaded = load_extensions(config)
+    assert loaded["shared"].root == work_ext.resolve()
+    assert loaded["shared"].cli_modules == ["work.cli"]

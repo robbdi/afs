@@ -43,6 +43,12 @@ Temporary shell override:
 export AFS_MCP_ALLOWED_ROOTS=/google
 ```
 
+If you want work-machine bundles or extensions to stay repo-local instead of
+landing in a shared user directory, set `extensions.extension_dirs` to a path
+inside the workspace or context. AFS now prefers earlier extension roots over
+later defaults, so a work-local install can safely override an older
+`~/.config/afs/extensions/<name>` copy with the same extension name.
+
 When a workspace path under `/google` moves, `afs context repair` and the
 background `context-warm` / `context-watch` services will try a conservative
 remap against registered workspace roots before leaving the mount broken. This

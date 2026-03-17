@@ -8,6 +8,7 @@ def test_service_manager_lists_builtins() -> None:
     manager = ServiceManager(config=AFSConfig(), platform_name="linux")
     names = [definition.name for definition in manager.list_definitions()]
     assert "orchestrator" in names
+    assert "agent-supervisor" in names
     assert "context-watch" in names
     assert "gemini-workspace-brief" in names
 
@@ -33,6 +34,13 @@ def test_context_watch_service_uses_watch_mode() -> None:
     assert definition is not None
     assert "--watch" in definition.command
     assert "--skip-embeddings" in definition.command
+
+
+def test_agent_supervisor_service_uses_agent_entrypoint() -> None:
+    manager = ServiceManager(config=AFSConfig(), platform_name="linux")
+    definition = manager.get_definition("agent-supervisor")
+    assert definition is not None
+    assert "afs.agents.supervisor" in definition.command
 
 
 def test_service_config_can_disable_service() -> None:

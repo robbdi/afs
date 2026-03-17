@@ -21,6 +21,8 @@ def pack_command(args: argparse.Namespace) -> int:
     print(f"packed: {result.path}")
     print(f"  files: {result.file_count}")
     print(f"  size:  {result.size_bytes} bytes")
+    if result.bundled_modules:
+        print(f"  modules: {', '.join(result.bundled_modules)}")
     return 0
 
 
@@ -30,14 +32,25 @@ def install_command(args: argparse.Namespace) -> int:
 
     bundle_path = Path(args.path).expanduser().resolve()
     name = args.name if args.name else None
+    install_dir = (
+        Path(args.install_dir).expanduser().resolve()
+        if args.install_dir
+        else None
+    )
     try:
-        result = install_bundle(bundle_path, name_override=name)
+        result = install_bundle(
+            bundle_path,
+            name_override=name,
+            install_dir=install_dir,
+        )
     except FileNotFoundError as exc:
         print(f"error: {exc}")
         return 1
 
     print(f"installed: {result.extension_path}")
     print(f"  profile: {result.profile_name}")
+    if result.profile_snippet_path:
+        print(f"  profile_snippet: {result.profile_snippet_path}")
     return 0
 
 
@@ -59,6 +72,8 @@ def inspect_command(args: argparse.Namespace) -> int:
             "description": result.manifest.description,
             "author": result.manifest.author,
             "resource_counts": result.resource_counts,
+            "bundled_modules": result.bundled_modules,
+            "profile": result.manifest.profile.to_dict(),
         }
         print(json.dumps(payload, indent=2))
         return 0
@@ -72,6 +87,14 @@ def inspect_command(args: argparse.Namespace) -> int:
         print("resources:")
         for dir_name, count in sorted(result.resource_counts.items()):
             print(f"  {dir_name}: {count} files")
+    if result.bundled_modules:
+        print("modules:")
+        for module_name in result.bundled_modules:
+            print(f"  {module_name}")
+    if result.manifest.profile.agent_configs:
+        print("profile agents:")
+        for agent in result.manifest.profile.agent_configs:
+            print(f"  {agent.name}\tmodule={agent.module}\tschedule={agent.schedule or '-'}")
     return 0
 
 
@@ -103,6 +126,7 @@ def register_parsers(subparsers: argparse._SubParsersAction) -> None:
     install_p = bundle_sub.add_parser("install", help="Install a bundle.")
     install_p.add_argument("path", help="Path to bundle directory.")
     install_p.add_argument("--name", help="Override bundle name.")
+    install_p.add_argument("--install-dir", help="Override extension install root.")
     install_p.set_defaults(func=install_command)
 
     inspect_p = bundle_sub.add_parser("inspect", help="Inspect a bundle.")

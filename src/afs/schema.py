@@ -238,6 +238,19 @@ class ProfileConfig:
             agent_configs=agent_configs,
         )
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "inherits": list(self.inherits),
+            "knowledge_mounts": [str(path) for path in self.knowledge_mounts],
+            "skill_roots": [str(path) for path in self.skill_roots],
+            "model_registries": [str(path) for path in self.model_registries],
+            "enabled_extensions": list(self.enabled_extensions),
+            "policies": list(self.policies),
+            "mcp_tools": list(self.mcp_tools),
+            "cli_modules": list(self.cli_modules),
+            "agent_configs": [agent.to_dict() for agent in self.agent_configs],
+        }
+
 
 @dataclass
 class ProfilesConfig:
@@ -332,6 +345,20 @@ class AgentConfig:
             module=str(data.get("module", "")).strip(),
             watch_paths=_as_path_list(data.get("watch_paths")),
         )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "role": self.role,
+            "backend": self.backend,
+            "description": self.description,
+            "tags": list(self.tags),
+            "auto_start": self.auto_start,
+            "triggers": list(self.triggers),
+            "schedule": self.schedule,
+            "module": self.module,
+            "watch_paths": [str(path) for path in self.watch_paths],
+        }
 
 
 @dataclass
@@ -673,6 +700,7 @@ class BundleManifest:
             "version": self.version,
             "description": self.description,
             "author": self.author,
+            "profile": self.profile.to_dict(),
             "skills_dir": self.skills_dir,
             "knowledge_dir": self.knowledge_dir,
             "tools_dir": self.tools_dir,

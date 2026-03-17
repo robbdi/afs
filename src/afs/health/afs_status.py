@@ -197,13 +197,23 @@ def render_afs_health(snapshot: dict[str, Any]) -> str:
     )
     warm = maintenance["reports"]["context_warm"]
     watch = maintenance["reports"]["context_watch"]
+    supervisor_report = maintenance["reports"]["agent_supervisor"]
+    supervisor_audit = maintenance["supervisor"]
     lines.append(
         "maintenance: "
         f"context_warm={warm['status'] or 'unknown'} "
         f"context_watch={watch['status'] or 'unknown'} "
+        f"agent_supervisor={supervisor_report['status'] or 'unknown'} "
         f"age={_format_age(warm['age_seconds'])} "
         f"degraded_contexts={maintenance['degraded_contexts']} "
         f"remapped_mounts={maintenance['remapped_mounts']}"
+    )
+    lines.append(
+        "agents: "
+        f"running={supervisor_audit['counts']['running']} "
+        f"failed={supervisor_audit['counts']['failed']} "
+        f"stopped={supervisor_audit['counts']['stopped']} "
+        f"manual_stop={supervisor_audit['counts']['manual_stop']}"
     )
     brief = maintenance["reports"]["gemini_workspace_brief"]
     if brief["available"]:
@@ -356,6 +366,7 @@ def _maintenance_health(config, context_root: Path) -> dict[str, Any]:
     reports = {
         "context_warm": _load_agent_report(agent_output_dir / "context_warm.json"),
         "context_watch": _load_agent_report(agent_output_dir / "context_watch.json"),
+        "agent_supervisor": _load_agent_report(agent_output_dir / "agent_supervisor.json"),
         "gemini_workspace_brief": _load_agent_report(
             agent_output_dir / "gemini_workspace_brief.json"
         ),
@@ -381,17 +392,42 @@ def _maintenance_health(config, context_root: Path) -> dict[str, Any]:
 
     service_manager = ServiceManager(config=config)
     services: dict[str, str] = {}
-    for name in ("context-warm", "context-watch", "gemini-workspace-brief"):
+    for name in (
+        "context-warm",
+        "context-watch",
+        "agent-supervisor",
+        "gemini-workspace-brief",
+    ):
         definition = service_manager.get_definition(name)
         if definition is None:
             continue
         services[name] = service_manager.status(name).state.value
+
+    try:
+        from ..agents.supervisor import AgentSupervisor
+
+        supervisor = AgentSupervisor(config=config)
+        supervisor_audit = supervisor.audit()
+    except Exception:
+        supervisor_audit = {
+            "state_dir": str(agent_output_dir / "supervisor"),
+            "counts": {
+                "running": 0,
+                "failed": 0,
+                "stopped": 0,
+                "manual_stop": 0,
+                "configured": 0,
+            },
+            "stale_pid_files": [],
+            "agents": [],
+        }
 
     return {
         "reports": reports,
         "services": services,
         "degraded_contexts": degraded_contexts,
         "remapped_mounts": remapped_mounts,
+        "supervisor": supervisor_audit,
     }
 
 

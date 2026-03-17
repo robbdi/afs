@@ -30,6 +30,21 @@ Also supported once installed into the active environment:
 ./scripts/afs profile switch work
 ```
 
+## Bundles
+
+```bash
+./scripts/afs bundle pack work --output ./dist
+./scripts/afs bundle inspect ./dist/work
+./scripts/afs bundle install ./dist/work --install-dir ./.afs/extensions
+./scripts/afs bundle list
+```
+
+`bundle install` now writes:
+
+- an installable extension under the chosen extension root
+- generated MCP/agent shims when the bundled profile defines `mcp_tools` or `agent_configs`
+- `profile-snippet.toml` you can merge into `afs.toml` to re-enable the bundled profile semantics safely
+
 ## Context
 
 ```bash
@@ -95,7 +110,10 @@ Gemini brief agent:
 
 ```bash
 ./scripts/afs agents run gemini-workspace-brief --stdout
+./scripts/afs agents ps --all
+./scripts/afs agents ps --all --json
 ./scripts/afs services start gemini-workspace-brief
+./scripts/afs services start agent-supervisor
 ./scripts/afs agents run claude-orchestrator --prompt "Summarize this repo"
 ./scripts/afs services start context-warm
 ```
@@ -110,6 +128,17 @@ For continuous maintenance, start the watcher:
 ```bash
 ./scripts/afs services start context-watch
 ```
+
+If you have profile-driven background agents with `auto_start`, `schedule`, or
+`watch_paths`, start the supervisor too:
+
+```bash
+./scripts/afs services start agent-supervisor
+```
+
+The supervisor stores state under
+`.context/scratchpad/afs_agents/supervisor/` by default, so repo- or
+context-scoped configs do not get shadowed by a single global PID cache.
 
 `context-watch` uses `context-warm --watch` and reacts to changes under the
 context root and mounted source paths. If the optional `watchfiles` package is
@@ -134,8 +163,9 @@ args = ["mcp", "serve"]
 `afs health` reports AFS MCP registration for Gemini, Claude, and Codex, and it
 detects both `python -m afs.mcp_server` and `afs mcp serve` processes. It also
 reports broken mounts, duplicate mount targets, provenance drift, repair/remap
-activity, and maintenance service state so you can see context drift without
-opening the directory manually.
+activity, maintenance service state, and supervisor agent state so you can see
+context drift or failed background agents without opening the directory
+manually.
 
 Repair a context directly when you want an explicit fix instead of waiting for a
 background service:

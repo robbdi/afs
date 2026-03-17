@@ -39,6 +39,8 @@ Extensions are discovered from `extension.toml` files.
 
 Discovery roots:
 
+- `AFS_EXTENSION_DIRS`
+- configured `extension_dirs`
 - `extensions/`
 - `~/.config/afs/extensions`
 - `~/.afs/extensions`
@@ -63,6 +65,10 @@ Manifest fields:
 
 `agent_modules` let an extension register extra `afs agents run ...` entries without
 putting personal or domain-specific agent code into core `afs`.
+
+When two extension roots contain the same manifest `name`, the first discovery
+root wins. That means repo-local or context-local extension dirs can safely
+override an older user-global install with the same name.
 
 `[mcp_tools]` example:
 
@@ -94,3 +100,15 @@ def register_mcp_server(_manager):
 
 Legacy `[mcp_tools]` remains supported for tool-only extensions. Core MCP
 resource URIs and prompt names are reserved and cannot be overridden.
+
+## Bundles
+
+`afs bundle install` materializes a bundle as a normal manifest extension. In
+addition to copying `knowledge/` and `skills/`, it can generate:
+
+- an `agent_modules` shim from bundled profile `agent_configs`
+- an `[mcp_server]` shim from bundled profile `mcp_tools`
+- `profile-snippet.toml` for safe profile reactivation
+
+That keeps bundles portable without requiring manual extension glue after
+install.

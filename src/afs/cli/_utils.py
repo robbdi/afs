@@ -244,6 +244,25 @@ def write_config(path: Path, config: AFSConfig) -> None:
             + _toml_array(list(profile.enabled_extensions))
         )
         lines.append("policies = " + _toml_array(list(profile.policies)))
+        lines.append("mcp_tools = " + _toml_array(list(profile.mcp_tools)))
+        lines.append("cli_modules = " + _toml_array(list(profile.cli_modules)))
+
+        for agent in profile.agent_configs:
+            lines.append("")
+            lines.append(f"[[profiles.{name}.agent_configs]]")
+            lines.append(f"name = \"{agent.name}\"")
+            lines.append(f"role = \"{agent.role}\"")
+            lines.append(f"backend = \"{agent.backend}\"")
+            lines.append(f"description = \"{agent.description}\"")
+            lines.append("tags = " + _toml_array(list(agent.tags)))
+            lines.append(f"auto_start = {str(agent.auto_start).lower()}")
+            lines.append("triggers = " + _toml_array(list(agent.triggers)))
+            lines.append(f"schedule = \"{agent.schedule}\"")
+            lines.append(f"module = \"{agent.module}\"")
+            lines.append(
+                "watch_paths = "
+                + _toml_array([str(path) for path in agent.watch_paths])
+            )
 
     lines.append("")
     lines.append("[hooks]")

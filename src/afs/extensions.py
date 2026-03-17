@@ -267,6 +267,8 @@ def discover_extension_manifests(
             manifest = load_extension_manifest(manifest_path)
         except Exception:
             continue
+        if manifest.name in discovered:
+            continue
         discovered[manifest.name] = manifest.manifest_path
     return dict(sorted(discovered.items()))
 

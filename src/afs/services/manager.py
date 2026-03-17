@@ -407,6 +407,11 @@ class ServiceManager:
             "AFS_CONTEXT_WATCH_POLL_SECONDS",
             default=30,
         )
+        agent_supervisor_report = agent_output_dir / "agent_supervisor.json"
+        agent_supervisor_interval = _resolve_interval_env(
+            "AFS_AGENT_SUPERVISOR_INTERVAL",
+            default=60,
+        )
         gemini_brief_report = agent_output_dir / "gemini_workspace_brief.json"
         gemini_brief_markdown = agent_output_dir / "gemini_workspace_brief.md"
         gemini_brief_interval = _resolve_interval_env(
@@ -458,6 +463,15 @@ class ServiceManager:
             "--rebuild-stale-indexes",
             "--skip-workspace-sync",
             "--skip-embeddings",
+        ]
+        agent_supervisor_command = [
+            python,
+            "-m",
+            "afs.agents.supervisor",
+            "--output",
+            str(agent_supervisor_report),
+            "--interval",
+            str(agent_supervisor_interval),
         ]
         gemini_workspace_brief_command = [
             python,
@@ -589,6 +603,17 @@ class ServiceManager:
                 label="AFS Context Watch",
                 description="Watch context and mounted-source paths and repair/reindex on change",
                 command=context_watch_command,
+                working_directory=working_root,
+                environment=environment,
+                service_type=ServiceType.DAEMON,
+                keep_alive=True,
+                run_at_load=False,
+            ),
+            "agent-supervisor": ServiceDefinition(
+                name="agent-supervisor",
+                label="AFS Agent Supervisor",
+                description="Reconcile configured background agents on an interval",
+                command=agent_supervisor_command,
                 working_directory=working_root,
                 environment=environment,
                 service_type=ServiceType.DAEMON,

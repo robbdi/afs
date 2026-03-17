@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from afs.agents.supervisor import AgentSupervisor
-from afs.schema import AgentConfig
+from afs.schema import AFSConfig, AgentConfig, GeneralConfig
 
 
 def test_supervisor_list_empty(tmp_path: Path) -> None:
@@ -61,7 +61,10 @@ def test_supervisor_spawn_and_stop(tmp_path: Path) -> None:
         stopped = supervisor.stop("stop-test")
 
     assert stopped is True
-    assert not (state_dir / "stop-test.json").exists()
+    status = supervisor.status("stop-test")
+    assert status is not None
+    assert status.state == "stopped"
+    assert status.manually_stopped is True
 
 
 def test_supervisor_list_detects_dead_pid(tmp_path: Path) -> None:
@@ -126,3 +129,55 @@ def test_supervisor_state_persistence(tmp_path: Path) -> None:
     assert status is not None
     assert status.pid == 55555
     assert status.state == "running"
+
+
+def test_supervisor_uses_context_scoped_state_dir(tmp_path: Path) -> None:
+    context_root = tmp_path / "context"
+    supervisor = AgentSupervisor(
+        config=AFSConfig(general=GeneralConfig(context_root=context_root))
+    )
+    assert supervisor._state_dir == context_root / "scratchpad" / "afs_agents" / "supervisor"
+
+
+def test_supervisor_due_schedules(tmp_path: Path) -> None:
+    state_dir = tmp_path / "state"
+    supervisor = AgentSupervisor(state_dir=state_dir)
+    configs = [
+        AgentConfig(name="scheduled", module="pkg.agent", schedule="5m"),
+        AgentConfig(name="disabled", module="pkg.agent", schedule=""),
+    ]
+    matched = supervisor.due_schedules(configs)
+    assert [config.name for config in matched] == ["scheduled"]
+
+
+def test_supervisor_watch_path_matching(tmp_path: Path) -> None:
+    supervisor = AgentSupervisor(state_dir=tmp_path / "state")
+    watch_path = tmp_path / "workspace"
+    watch_path.mkdir()
+    configs = [
+        AgentConfig(name="watcher", module="pkg.agent", watch_paths=[watch_path]),
+        AgentConfig(name="other", module="pkg.agent", watch_paths=[tmp_path / "other"]),
+    ]
+    matched = supervisor.evaluate_watch_paths([watch_path / "changed.txt"], configs)
+    assert [config.name for config in matched] == ["watcher"]
+
+
+def test_supervisor_audit_reports_failed_and_manual_stop(tmp_path: Path) -> None:
+    state_dir = tmp_path / "state"
+    supervisor = AgentSupervisor(state_dir=state_dir)
+
+    failed = type("MockProc", (), {"pid": 12345})()
+    stopped = type("MockProc", (), {"pid": 23456})()
+    with patch("subprocess.Popen", side_effect=[failed, stopped]):
+        supervisor.spawn("failed-agent", "pkg.failed")
+        supervisor.spawn("stopped-agent", "pkg.stopped")
+
+    with patch.object(supervisor, "_pid_alive", return_value=False):
+        supervisor.status("failed-agent")
+    with patch.object(supervisor, "_pid_alive", return_value=True):
+        supervisor.stop("stopped-agent")
+    audit = supervisor.audit()
+
+    assert audit["counts"]["failed"] == 1
+    assert audit["counts"]["manual_stop"] == 1
+    assert "failed-agent" in audit["stale_pid_files"]

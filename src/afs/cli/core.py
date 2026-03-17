@@ -268,13 +268,39 @@ def agents_ps_command(args: argparse.Namespace) -> int:
     from ..agents.supervisor import AgentSupervisor
 
     supervisor = AgentSupervisor()
-    agents = [agent for agent in supervisor.list_running() if agent.state == "running"]
+    agents = supervisor.list_agents()
+    if not args.all:
+        agents = [agent for agent in agents if agent.state == "running"]
     if not agents:
-        print("no running agents")
+        print("no matching agents")
+        return 0
+    if args.json:
+        payload = [
+            {
+                "name": agent.name,
+                "state": agent.state,
+                "pid": agent.pid,
+                "started_at": agent.started_at,
+                "module": agent.module,
+                "last_event": agent.last_event,
+                "last_error": agent.last_error,
+                "manually_stopped": agent.manually_stopped,
+            }
+            for agent in agents
+        ]
+        print(json.dumps(payload, indent=2))
         return 0
     for agent in agents:
         pid = agent.pid or "-"
-        print(f"{agent.name}\t{agent.state}\tpid={pid}\t{agent.started_at}")
+        extra = []
+        if agent.last_event:
+            extra.append(f"event={agent.last_event}")
+        if agent.manually_stopped:
+            extra.append("manual-stop")
+        if agent.last_error:
+            extra.append(f"error={agent.last_error}")
+        suffix = f"\t{' '.join(extra)}" if extra else ""
+        print(f"{agent.name}\t{agent.state}\tpid={pid}\t{agent.started_at}{suffix}")
     return 0
 
 
@@ -540,23 +566,28 @@ def status_command(args: argparse.Namespace) -> int:
         print("  index: disabled")
 
     # Running agents
-    try:
-        from ..agents.supervisor import AgentSupervisor
-
-        supervisor = AgentSupervisor()
-        running_agents = [a for a in supervisor.list_running() if a.state == "running"]
-        if running_agents:
-            print(f"  agents: {len(running_agents)} running")
-    except Exception:
-        pass
+    supervisor_audit = maintenance.get("supervisor", {})
+    counts = supervisor_audit.get("counts", {})
+    print()
+    print(
+        "  agents: "
+        f"running={counts.get('running', 0)} "
+        f"failed={counts.get('failed', 0)} "
+        f"stopped={counts.get('stopped', 0)} "
+        f"manual_stop={counts.get('manual_stop', 0)}"
+    )
+    if supervisor_audit.get("stale_pid_files"):
+        print("  agent_issues: " + ", ".join(supervisor_audit["stale_pid_files"]))
 
     warm = maintenance["reports"]["context_warm"]
     watch = maintenance["reports"]["context_watch"]
+    agent_supervisor = maintenance["reports"]["agent_supervisor"]
     print()
     print(
         "  maintenance: "
         f"context_warm={warm['status'] or 'unknown'} "
         f"context_watch={watch['status'] or 'unknown'} "
+        f"agent_supervisor={agent_supervisor['status'] or 'unknown'} "
         f"degraded_contexts={maintenance['degraded_contexts']} "
         f"remapped_mounts={maintenance['remapped_mounts']}"
     )
@@ -635,7 +666,9 @@ def register_parsers(subparsers: argparse._SubParsersAction) -> None:
     agents_list = agents_sub.add_parser("list", help="List available agents.")
     agents_list.set_defaults(func=agents_list_command)
 
-    agents_ps = agents_sub.add_parser("ps", help="List running background agents.")
+    agents_ps = agents_sub.add_parser("ps", help="List background agent processes.")
+    agents_ps.add_argument("--all", action="store_true", help="Include failed/stopped agent state.")
+    agents_ps.add_argument("--json", action="store_true", help="Output JSON.")
     agents_ps.set_defaults(func=agents_ps_command)
 
     agents_run = agents_sub.add_parser("run", help="Run a built-in agent.")

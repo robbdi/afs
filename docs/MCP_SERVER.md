@@ -85,6 +85,9 @@ In Antigravity, open `MCP Servers -> Manage MCP Servers -> View raw config`, the
 - `context.diff`
 - `context.status`
 - `context.repair`
+- `agent.spawn`
+- `agent.ps`
+- `agent.stop`
 
 `context.query` uses a SQLite index with FTS ranking when available, and falls
 back to `LIKE` matching if FTS is unavailable on the host SQLite build.
@@ -120,6 +123,10 @@ max_content_chars = 12000
 ```
 
 Extensions can extend the MCP surface via `extension.toml`.
+
+Bundle-installed extensions can also generate a wrapper MCP surface automatically
+from bundled profile `mcp_tools`, so a packed profile can round-trip through
+`afs bundle pack` / `afs bundle install` without hand-writing another manifest.
 
 Legacy tool-only registration still works:
 
@@ -184,6 +191,17 @@ def register_mcp_server(_manager):
 Core tool names, core prompt names, and reserved `afs://contexts` /
 `afs://context/...` resources cannot be overridden by extensions.
 
+Extension directory precedence matters when names collide:
+
+- `AFS_EXTENSION_DIRS`
+- configured `[extensions].extension_dirs`
+- repo `extensions/`
+- `~/.config/afs/extensions`
+- `~/.afs/extensions`
+
+Earlier directories win. That lets repo-local or context-local installs override
+an older user-global extension with the same name.
+
 Path operations are scoped to:
 
 - `~/.context`
@@ -228,7 +246,9 @@ Gemini background brief surfaces:
 
 ```bash
 ~/src/lab/afs/scripts/afs agents run gemini-workspace-brief --stdout
+~/src/lab/afs/scripts/afs agents ps --all
 ~/src/lab/afs/scripts/afs services start gemini-workspace-brief
+~/src/lab/afs/scripts/afs services start agent-supervisor
 ~/src/lab/afs/scripts/afs services start context-warm
 ~/src/lab/afs/scripts/afs services start context-watch
 ```
@@ -245,12 +265,17 @@ provenance, and stale indexes. The built-in service runs with
 repair/index work for the affected contexts. If `watchfiles` is not installed,
 it falls back to polling.
 
+`agent-supervisor` is the companion service for profile-defined background
+agents. It reconciles `auto_start`, interval `schedule`, and `watch_paths`
+settings and keeps state under `.context/scratchpad/afs_agents/supervisor/` by
+default.
+
 `afs health` now reports AFS MCP registration across Gemini, Claude, and Codex
 config surfaces, and it recognizes both `python -m afs.mcp_server` and
 wrapper-style `afs mcp serve` processes. It also surfaces context mount drift so
 agents can distinguish path access problems from index staleness quickly, and it
 includes maintenance report/service state for `context-warm`, `context-watch`,
-and `gemini-workspace-brief`.
+`agent-supervisor`, and `gemini-workspace-brief`.
 
 ## Example Call Shape
 

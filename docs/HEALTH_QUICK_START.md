@@ -18,7 +18,8 @@ This reports:
 - embedding index age summary
 - extension/hook status
 - MCP status
-- maintenance status for `context-warm`, `context-watch`, and `gemini-workspace-brief`
+- maintenance status for `context-warm`, `context-watch`, `agent-supervisor`, and `gemini-workspace-brief`
+- supervisor state: running, failed, manually stopped, and stale agent state files
 
 ## JSON Output
 
@@ -54,6 +55,7 @@ This reports:
 3. If `mount_health` or provenance looks wrong, run `./scripts/afs context repair --dry-run`.
 4. Apply the repair with `./scripts/afs context repair --rebuild-index`, or let `./scripts/afs services start context-warm` handle it in the background.
 5. For continuous repo-local maintenance, start `./scripts/afs services start context-watch`.
-6. If SQLite index health is stale, rebuild with `./scripts/afs mcp serve` plus `context.index.rebuild`, or let `context-warm` / `context-watch` handle it.
-7. If monorepo bridge is stale, refresh `monorepo/active_workspace.toml` via workspace switch hook.
-8. If MCP tools look wrong, check `./scripts/afs mcp serve` and extension `[mcp_tools]` config.
+6. If you rely on profile-defined background agents, start `./scripts/afs services start agent-supervisor`.
+7. If SQLite index health is stale, rebuild with `./scripts/afs mcp serve` plus `context.index.rebuild`, or let `context-warm` / `context-watch` handle it.
+8. If monorepo bridge is stale, refresh `monorepo/active_workspace.toml` via workspace switch hook.
+9. If MCP tools look wrong, check `./scripts/afs mcp serve` and extension `[mcp_tools]` / `[mcp_server]` config.

@@ -98,13 +98,20 @@ def test_bundle_manifest_round_trip() -> None:
         name="round-trip",
         version="2.0.0",
         description="Test round trip",
+        profile=ProfileConfig(
+            cli_modules=["bundle.cli"],
+            agent_configs=[AgentConfig(name="bundle-agent", module="bundle.agent")],
+        ),
     )
     data = manifest.to_dict()
     assert data["name"] == "round-trip"
     assert data["version"] == "2.0.0"
+    assert data["profile"]["cli_modules"] == ["bundle.cli"]
     restored = BundleManifest.from_dict(data)
     assert restored.name == manifest.name
     assert restored.version == manifest.version
+    assert restored.profile.cli_modules == ["bundle.cli"]
+    assert restored.profile.agent_configs[0].name == "bundle-agent"
 
 
 def test_bundle_manifest_defaults() -> None:

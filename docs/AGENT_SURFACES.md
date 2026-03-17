@@ -155,7 +155,9 @@ Gemini background agent surfaces:
 
 ```bash
 ~/src/lab/afs/scripts/afs agents run gemini-workspace-brief --stdout
+~/src/lab/afs/scripts/afs agents ps --all
 ~/src/lab/afs/scripts/afs services start gemini-workspace-brief
+~/src/lab/afs/scripts/afs services start agent-supervisor
 ~/src/lab/afs/scripts/afs agents run claude-orchestrator --prompt "Summarize this workspace"
 ```
 
@@ -189,6 +191,17 @@ source still exists.
 --watch` to watch the context root and mounted source paths, then reruns repair
 and index maintenance only for affected contexts. If the optional `watchfiles`
 package is unavailable, it degrades to polling.
+
+`agent-supervisor` is the process reconciler for profile-defined background
+agents. It applies:
+
+- `auto_start`
+- interval-style `schedule` values such as `5m`, `1h`, `daily`, or `weekly`
+- `watch_paths` change detection
+
+By default it stores state under
+`.context/scratchpad/afs_agents/supervisor/`, which makes repo-local and
+context-local configs safer than a single user-global state cache.
 
 Direct repair surface:
 

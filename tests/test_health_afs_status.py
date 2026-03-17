@@ -61,6 +61,8 @@ def test_collect_afs_health_snapshot(tmp_path: Path, monkeypatch) -> None:
     assert "registered_clients" in snapshot["mcp"]
     assert "registered_with_claude" in snapshot["mcp"]
     assert "registered_with_codex" in snapshot["mcp"]
+    assert "supervisor" in snapshot["maintenance"]
+    assert "agent_supervisor" in snapshot["maintenance"]["reports"]
 
 
 def test_detect_mcp_running_matches_cli_variants() -> None:
