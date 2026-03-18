@@ -41,6 +41,10 @@ That mapping is authoritative for built-in subsystems too: task queues, hivemind
 messages, history logs, MCP prompts/tools, and background-agent reports resolve
 their mount roots by role, not by hardcoded directory name.
 
+History is metadata-first by default. Full payload capture is opt-in through
+`[history].include_payloads = true` or explicit per-event calls, and filesystem
+read/write events record content hashes and sizes instead of raw file contents.
+
 ## Access Patterns
 
 Use the context filesystem CLI for scoped operations:

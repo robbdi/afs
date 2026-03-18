@@ -269,6 +269,7 @@ class DistillationDataGenerator:
                         "system": system_prompt,
                         "response": response.content,
                     },
+                    include_payloads=True,
                 )
 
                 if quality >= self.config.min_quality_score:

@@ -75,11 +75,11 @@ class GeminiClient(LLMClient):
                 from google import genai
 
                 self._client = genai.Client(api_key=self.api_key)
-            except ImportError:
+            except ImportError as exc:
                 raise ImportError(
                     "google-genai not installed. "
                     "Install with: pip install google-genai"
-                )
+                ) from exc
         return self._client
 
     def generate(
@@ -120,6 +120,7 @@ class GeminiClient(LLMClient):
                 "system": system,
                 "response": content,
             },
+            include_payloads=True,
         )
         return content
 
@@ -147,10 +148,10 @@ class ClaudeClient(LLMClient):
                 import anthropic
 
                 self._client = anthropic.Anthropic(api_key=self.api_key)
-            except ImportError:
+            except ImportError as exc:
                 raise ImportError(
                     "anthropic not installed. Install with: pip install anthropic"
-                )
+                ) from exc
         return self._client
 
     def generate(
@@ -186,6 +187,7 @@ class ClaudeClient(LLMClient):
                 "system": system_prompt or ASM_COT_SYSTEM_PROMPT,
                 "response": content,
             },
+            include_payloads=True,
         )
         return content
 
@@ -213,10 +215,10 @@ class OpenAIClient(LLMClient):
                 from openai import OpenAI
 
                 self._client = OpenAI(api_key=self.api_key)
-            except ImportError:
+            except ImportError as exc:
                 raise ImportError(
                     "openai not installed. Install with: pip install openai"
-                )
+                ) from exc
         return self._client
 
     def generate(
@@ -255,6 +257,7 @@ class OpenAIClient(LLMClient):
                 "system": system_prompt or ASM_COT_SYSTEM_PROMPT,
                 "response": content,
             },
+            include_payloads=True,
         )
         return content
 

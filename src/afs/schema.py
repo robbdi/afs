@@ -452,7 +452,7 @@ class ServicesConfig:
 @dataclass
 class HistoryConfig:
     enabled: bool = True
-    include_payloads: bool = True
+    include_payloads: bool = False
     max_inline_chars: int = 4000
     payload_dir_name: str = "payloads"
     redact_sensitive: bool = True
@@ -461,7 +461,7 @@ class HistoryConfig:
     def from_dict(cls, data: dict[str, Any]) -> HistoryConfig:
         return cls(
             enabled=bool(data.get("enabled", True)),
-            include_payloads=bool(data.get("include_payloads", True)),
+            include_payloads=bool(data.get("include_payloads", False)),
             max_inline_chars=int(data.get("max_inline_chars", cls().max_inline_chars)),
             payload_dir_name=str(data.get("payload_dir_name", cls().payload_dir_name)),
             redact_sensitive=bool(data.get("redact_sensitive", True)),

@@ -269,6 +269,7 @@ def log_event(
     metadata: dict[str, Any] | None = None,
     payload: Any | None = None,
     context_root: Path | None = None,
+    include_payloads: bool | None = None,
     redact_sensitive: bool | None = None,
 ) -> str | None:
     """Append an event to the history log.
@@ -295,6 +296,11 @@ def log_event(
     payload_ref = None
     payload_sha256 = None
     payload_preview = None
+    payloads_enabled = (
+        config.history.include_payloads
+        if include_payloads is None
+        else include_payloads
+    )
 
     redact = (
         config.history.redact_sensitive
@@ -302,7 +308,7 @@ def log_event(
         else redact_sensitive
     )
 
-    if payload is not None and config.history.include_payloads:
+    if payload is not None and payloads_enabled:
         normalized = _normalize_payload(payload)
         if redact:
             normalized = _redact_payload(normalized)

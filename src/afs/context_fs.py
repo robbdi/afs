@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import logging
 import os
 from dataclasses import dataclass
@@ -100,6 +101,13 @@ class ContextFileSystem:
             raise PermissionError(message)
         assert_mount_allowed(mount_type, operation=operation)
 
+    def _content_history_metadata(self, content: str) -> dict[str, object]:
+        return {
+            "content_chars": len(content),
+            "content_lines": content.count("\n") + (1 if content else 0),
+            "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+        }
+
     def read_text(
         self,
         mount_type: MountType,
@@ -135,8 +143,9 @@ class ContextFileSystem:
                 "relative_path": relative_path,
                 "context_path": str(self._context_path),
                 "encoding": encoding,
+                **self._content_history_metadata(content),
             },
-            payload={"content": content},
+            include_payloads=False,
         )
         return content
 
@@ -209,8 +218,9 @@ class ContextFileSystem:
                 "encoding": encoding,
                 "append": append,
                 "mkdirs": mkdirs,
+                **self._content_history_metadata(content),
             },
-            payload={"content": content},
+            include_payloads=False,
         )
         self._sync_index_for_write(mount_type, relative_path)
         return target
