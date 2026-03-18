@@ -77,6 +77,21 @@ For compatibility, `./scripts/afs review approve project-a draft.md` still
 works when `project-a` can be resolved from configured
 `general.workspace_directories`.
 
+## Memory
+
+```bash
+./scripts/afs memory consolidate --path ~/src/project-a
+./scripts/afs memory consolidate --path ~/src/project-a --json
+./scripts/afs agents run history-memory --stdout
+./scripts/afs services start history-memory
+```
+
+`memory consolidate` is the canonical history-to-memory step. It reads new
+metadata-first history events, writes durable summaries into
+`memory/entries.jsonl`, writes markdown summaries into
+`memory/history_consolidation/`, and checkpoints incremental progress under
+`.context/scratchpad/afs_agents/history_memory_checkpoint.json`.
+
 ## Workspace
 
 ```bash
@@ -154,6 +169,7 @@ If you have profile-driven background agents with `auto_start`, `schedule`, or
 
 ```bash
 ./scripts/afs services start agent-supervisor
+./scripts/afs services start history-memory
 ```
 
 The supervisor stores state under
@@ -169,7 +185,9 @@ If you want background services to stay pinned to a repo-local config and
 ```
 
 `afs services render|start|stop|status|restart` preserve that explicit
-`AFS_CONFIG_PATH` for the spawned service process.
+`AFS_CONFIG_PATH` for the spawned service process. `afs status` and
+`afs health` also surface the `history-memory` maintenance report alongside
+`context-warm`, `context-watch`, and `agent-supervisor`.
 
 `context-watch` uses `context-warm --watch` and reacts to changes under the
 context root and mounted source paths. If the optional `watchfiles` package is

@@ -39,6 +39,7 @@ def test_service_manager_lists_builtins() -> None:
     assert "agent-supervisor" in names
     assert "context-watch" in names
     assert "gemini-workspace-brief" in names
+    assert "history-memory" in names
 
 
 def test_gemini_workspace_brief_service_uses_agent_entrypoint() -> None:
@@ -46,6 +47,13 @@ def test_gemini_workspace_brief_service_uses_agent_entrypoint() -> None:
     definition = manager.get_definition("gemini-workspace-brief")
     assert definition is not None
     assert "afs.agents.gemini_workspace_brief" in definition.command
+
+
+def test_history_memory_service_uses_agent_entrypoint() -> None:
+    manager = ServiceManager(config=AFSConfig(), platform_name="linux")
+    definition = manager.get_definition("history-memory")
+    assert definition is not None
+    assert "afs.agents.history_memory" in definition.command
 
 
 def test_context_warm_service_rebuilds_stale_indexes() -> None:

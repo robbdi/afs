@@ -123,3 +123,37 @@ def test_load_config_model_merges_env_mcp_allowed_roots(tmp_path, monkeypatch) -
 
     model = load_config_model(config_path=config_path, merge_user=False)
     assert model.general.mcp_allowed_roots == [configured.resolve(), env_root.resolve()]
+
+
+def test_load_config_model_parses_memory_consolidation_settings(tmp_path) -> None:
+    report_output = tmp_path / "reports" / "history_memory.json"
+    config_path = tmp_path / "memory_consolidation.toml"
+    config_path.write_text(
+        "[memory_consolidation]\n"
+        "enabled = true\n"
+        "auto_start = true\n"
+        "interval_seconds = 900\n"
+        f"report_output = \"{report_output}\"\n"
+        "entries_filename = \"durable.jsonl\"\n"
+        "summary_dir_name = \"history_notes\"\n"
+        "checkpoint_filename = \"cursor.json\"\n"
+        "max_events_per_run = 42\n"
+        "max_events_per_entry = 7\n"
+        "include_event_types = [\"fs\", \"context\"]\n"
+        "write_markdown = false\n",
+        encoding="utf-8",
+    )
+
+    model = load_config_model(config_path=config_path, merge_user=False)
+
+    assert model.memory_consolidation.enabled is True
+    assert model.memory_consolidation.auto_start is True
+    assert model.memory_consolidation.interval_seconds == 900
+    assert model.memory_consolidation.report_output == report_output.resolve()
+    assert model.memory_consolidation.entries_filename == "durable.jsonl"
+    assert model.memory_consolidation.summary_dir_name == "history_notes"
+    assert model.memory_consolidation.checkpoint_filename == "cursor.json"
+    assert model.memory_consolidation.max_events_per_run == 42
+    assert model.memory_consolidation.max_events_per_entry == 7
+    assert model.memory_consolidation.include_event_types == ["fs", "context"]
+    assert model.memory_consolidation.write_markdown is False

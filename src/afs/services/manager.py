@@ -400,9 +400,18 @@ class ServiceManager:
         context_root = self.config.general.context_root
         agent_output_dir = resolve_agent_output_root(context_root, config=self.config)
         memory_cfg = self.config.memory_export
+        memory_consolidation_cfg = self.config.memory_consolidation
         memory_report = memory_cfg.report_output or (agent_output_dir / "memory_export.json")
+        history_memory_report = memory_consolidation_cfg.report_output or (
+            agent_output_dir / "history_memory.json"
+        )
         memory_dataset = memory_cfg.dataset_output
         memory_interval = memory_cfg.interval_seconds if memory_cfg.interval_seconds > 0 else 3600
+        history_memory_interval = (
+            memory_consolidation_cfg.interval_seconds
+            if memory_consolidation_cfg.interval_seconds > 0
+            else 1800
+        )
         context_warm_report = agent_output_dir / "context_warm.json"
         context_warm_interval = _resolve_interval_env("AFS_CONTEXT_WARM_INTERVAL", default=3600)
         context_watch_report = agent_output_dir / "context_watch.json"
@@ -439,6 +448,24 @@ class ServiceManager:
             memory_command.extend(["--default-instruction", memory_cfg.default_instruction])
         if memory_cfg.limit and memory_cfg.limit > 0:
             memory_command.extend(["--limit", str(memory_cfg.limit)])
+
+        history_memory_command = [
+            python,
+            "-m",
+            "afs.agents.history_memory",
+            "--output",
+            str(history_memory_report),
+            "--interval",
+            str(history_memory_interval),
+            "--max-events",
+            str(memory_consolidation_cfg.max_events_per_run),
+            "--max-events-per-entry",
+            str(memory_consolidation_cfg.max_events_per_entry),
+        ]
+        for event_type in memory_consolidation_cfg.include_event_types:
+            history_memory_command.extend(["--event-type", event_type])
+        if not memory_consolidation_cfg.write_markdown:
+            history_memory_command.append("--no-markdown")
 
         context_warm_command = [
             python,
@@ -589,6 +616,20 @@ class ServiceManager:
                 service_type=ServiceType.DAEMON,
                 keep_alive=True,
                 run_at_load=bool(memory_cfg.auto_start),
+            ),
+            "history-memory": ServiceDefinition(
+                name="history-memory",
+                label="AFS History Memory",
+                description="Consolidate recent history events into durable memory summaries",
+                command=history_memory_command,
+                working_directory=working_root,
+                environment=environment,
+                service_type=ServiceType.DAEMON,
+                keep_alive=True,
+                run_at_load=bool(
+                    memory_consolidation_cfg.enabled
+                    and memory_consolidation_cfg.auto_start
+                ),
             ),
             "context-warm": ServiceDefinition(
                 name="context-warm",

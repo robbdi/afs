@@ -117,6 +117,16 @@ def _expand_config_paths(config_data: dict[str, Any]) -> None:
                 if isinstance(route, dict) and "output" in route:
                     route["output"] = _expand_path(route["output"])
 
+    if "memory_consolidation" in config_data:
+        memory_consolidation = config_data["memory_consolidation"]
+        if (
+            "report_output" in memory_consolidation
+            and memory_consolidation["report_output"]
+        ):
+            memory_consolidation["report_output"] = _expand_path(
+                memory_consolidation["report_output"]
+            )
+
 
 def load_config(config_path: Path | None = None, merge_user: bool = True) -> dict[str, Any]:
     """Load configuration with basic precedence and path expansion."""

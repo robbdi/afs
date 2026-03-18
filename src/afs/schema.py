@@ -538,6 +538,73 @@ class MemoryExportConfig:
 
 
 @dataclass
+class MemoryConsolidationConfig:
+    enabled: bool = True
+    auto_start: bool = False
+    interval_seconds: int = 0
+    report_output: Path | None = None
+    entries_filename: str = "entries.jsonl"
+    summary_dir_name: str = "history_consolidation"
+    checkpoint_filename: str = "history_memory_checkpoint.json"
+    max_events_per_run: int = 200
+    max_events_per_entry: int = 50
+    include_event_types: list[str] = field(
+        default_factory=lambda: [
+            "agent_progress",
+            "context",
+            "fs",
+            "hook",
+            "review",
+        ]
+    )
+    write_markdown: bool = True
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> MemoryConsolidationConfig:
+        interval_seconds = data.get("interval_seconds", cls().interval_seconds)
+        report_output = data.get("report_output")
+        entries_filename = data.get("entries_filename", cls().entries_filename)
+        summary_dir_name = data.get("summary_dir_name", cls().summary_dir_name)
+        checkpoint_filename = data.get("checkpoint_filename", cls().checkpoint_filename)
+        max_events_per_run = data.get("max_events_per_run", cls().max_events_per_run)
+        max_events_per_entry = data.get("max_events_per_entry", cls().max_events_per_entry)
+        include_event_types = data.get("include_event_types", cls().include_event_types)
+        return cls(
+            enabled=bool(data.get("enabled", True)),
+            auto_start=bool(data.get("auto_start", cls().auto_start)),
+            interval_seconds=int(interval_seconds)
+            if isinstance(interval_seconds, (int, float))
+            else cls().interval_seconds,
+            report_output=_as_path(report_output)
+            if isinstance(report_output, (str, Path))
+            else None,
+            entries_filename=str(entries_filename).strip()
+            if isinstance(entries_filename, str) and str(entries_filename).strip()
+            else cls().entries_filename,
+            summary_dir_name=str(summary_dir_name).strip()
+            if isinstance(summary_dir_name, str) and str(summary_dir_name).strip()
+            else cls().summary_dir_name,
+            checkpoint_filename=str(checkpoint_filename).strip()
+            if isinstance(checkpoint_filename, str) and str(checkpoint_filename).strip()
+            else cls().checkpoint_filename,
+            max_events_per_run=int(max_events_per_run)
+            if isinstance(max_events_per_run, (int, float)) and int(max_events_per_run) > 0
+            else cls().max_events_per_run,
+            max_events_per_entry=int(max_events_per_entry)
+            if isinstance(max_events_per_entry, (int, float)) and int(max_events_per_entry) > 0
+            else cls().max_events_per_entry,
+            include_event_types=[
+                str(event_type).strip()
+                for event_type in include_event_types
+                if isinstance(event_type, str) and str(event_type).strip()
+            ]
+            if isinstance(include_event_types, list)
+            else list(cls().include_event_types),
+            write_markdown=bool(data.get("write_markdown", cls().write_markdown)),
+        )
+
+
+@dataclass
 class MemoryExportRoute:
     tags: list[str]
     output: Path
@@ -638,6 +705,9 @@ class AFSConfig:
     services: ServicesConfig = field(default_factory=ServicesConfig)
     history: HistoryConfig = field(default_factory=HistoryConfig)
     memory_export: MemoryExportConfig = field(default_factory=MemoryExportConfig)
+    memory_consolidation: MemoryConsolidationConfig = field(
+        default_factory=MemoryConsolidationConfig
+    )
     context_index: ContextIndexConfig = field(default_factory=ContextIndexConfig)
 
     @classmethod
@@ -657,6 +727,9 @@ class AFSConfig:
         services = ServicesConfig.from_dict(data.get("services", {}))
         history = HistoryConfig.from_dict(data.get("history", {}))
         memory_export = MemoryExportConfig.from_dict(data.get("memory_export", {}))
+        memory_consolidation = MemoryConsolidationConfig.from_dict(
+            data.get("memory_consolidation", {})
+        )
         context_index = ContextIndexConfig.from_dict(data.get("context_index", {}))
         return cls(
             general=general,
@@ -670,6 +743,7 @@ class AFSConfig:
             services=services,
             history=history,
             memory_export=memory_export,
+            memory_consolidation=memory_consolidation,
             context_index=context_index,
         )
 

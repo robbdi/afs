@@ -45,6 +45,46 @@ History is metadata-first by default. Full payload capture is opt-in through
 `[history].include_payloads = true` or explicit per-event calls, and filesystem
 read/write events record content hashes and sizes instead of raw file contents.
 
+## Canonical Lifecycle
+
+AFS now has a first-class history-to-memory consolidation loop:
+
+- `history/` remains the append-only event ledger
+- `memory/entries.jsonl` stores durable summarized memories
+- `memory/history_consolidation/` stores human-readable markdown summaries
+- `.context/scratchpad/afs_agents/history_memory_checkpoint.json` tracks the
+  last consolidated event for incremental runs
+
+Run it manually:
+
+```bash
+./scripts/afs memory consolidate --path ~/src/project-a
+./scripts/afs memory consolidate --path ~/src/project-a --json
+```
+
+Run it continuously:
+
+```bash
+./scripts/afs agents run history-memory --stdout
+./scripts/afs services start history-memory
+```
+
+The built-in consolidator is intentionally low-sensitivity. By default it
+summarizes `context`, `fs`, `hook`, `review`, and `agent_progress` events into
+compact durable entries without copying raw history payloads into memory.
+
+Optional config:
+
+```toml
+[memory_consolidation]
+interval_seconds = 1800
+auto_start = true
+include_event_types = ["context", "fs", "review"]
+max_events_per_run = 200
+max_events_per_entry = 50
+write_markdown = true
+```
+
 ## Access Patterns
 
 Use the context filesystem CLI for scoped operations:

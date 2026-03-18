@@ -85,6 +85,7 @@ def test_collect_afs_health_snapshot(tmp_path: Path, monkeypatch) -> None:
     assert "registered_with_codex" in snapshot["mcp"]
     assert "supervisor" in snapshot["maintenance"]
     assert "agent_supervisor" in snapshot["maintenance"]["reports"]
+    assert "history_memory" in snapshot["maintenance"]["reports"]
 
 
 def test_detect_mcp_running_matches_cli_variants() -> None:
@@ -142,4 +143,7 @@ def test_collect_afs_health_uses_remapped_history_and_scratchpad(
     assert snapshot["hooks"]["events"]["before_context_read"]["last_run"] == "2026-03-17T12:00:00+00:00"
     assert snapshot["maintenance"]["reports"]["context_warm"]["path"] == str(
         report_dir / "context_warm.json"
+    )
+    assert snapshot["maintenance"]["reports"]["history_memory"]["path"] == str(
+        report_dir / "history_memory.json"
     )

@@ -155,8 +155,10 @@ Gemini background agent surfaces:
 
 ```bash
 ~/src/lab/afs/scripts/afs agents run gemini-workspace-brief --stdout
+~/src/lab/afs/scripts/afs agents run history-memory --stdout
 ~/src/lab/afs/scripts/afs agents ps --all
 ~/src/lab/afs/scripts/afs services start gemini-workspace-brief
+~/src/lab/afs/scripts/afs services start history-memory
 ~/src/lab/afs/scripts/afs services start agent-supervisor
 ~/src/lab/afs/scripts/afs agents run claude-orchestrator --prompt "Summarize this workspace"
 ```
@@ -214,6 +216,13 @@ agents. It applies:
 By default it stores state under
 `.context/scratchpad/afs_agents/supervisor/`, which makes repo-local and
 context-local configs safer than a single user-global state cache.
+
+`history-memory` is the canonical durable-memory surface. It incrementally
+consolidates new `history/` events into compact summaries in `memory/` and
+tracks progress with a context-scoped checkpoint under
+`.context/scratchpad/afs_agents/`. By default it summarizes low-sensitivity
+event types (`context`, `fs`, `hook`, `review`, and `agent_progress`) rather
+than copying raw payloads into memory.
 
 Direct repair surface:
 

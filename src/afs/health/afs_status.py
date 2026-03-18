@@ -200,12 +200,14 @@ def render_afs_health(snapshot: dict[str, Any]) -> str:
     warm = maintenance["reports"]["context_warm"]
     watch = maintenance["reports"]["context_watch"]
     supervisor_report = maintenance["reports"]["agent_supervisor"]
+    history_memory = maintenance["reports"]["history_memory"]
     supervisor_audit = maintenance["supervisor"]
     lines.append(
         "maintenance: "
         f"context_warm={warm['status'] or 'unknown'} "
         f"context_watch={watch['status'] or 'unknown'} "
         f"agent_supervisor={supervisor_report['status'] or 'unknown'} "
+        f"history_memory={history_memory['status'] or 'unknown'} "
         f"age={_format_age(warm['age_seconds'])} "
         f"degraded_contexts={maintenance['degraded_contexts']} "
         f"remapped_mounts={maintenance['remapped_mounts']}"
@@ -369,6 +371,7 @@ def _maintenance_health(config, context_root: Path) -> dict[str, Any]:
         "context_warm": _load_agent_report(agent_output_dir / "context_warm.json"),
         "context_watch": _load_agent_report(agent_output_dir / "context_watch.json"),
         "agent_supervisor": _load_agent_report(agent_output_dir / "agent_supervisor.json"),
+        "history_memory": _load_agent_report(agent_output_dir / "history_memory.json"),
         "gemini_workspace_brief": _load_agent_report(
             agent_output_dir / "gemini_workspace_brief.json"
         ),
@@ -398,6 +401,7 @@ def _maintenance_health(config, context_root: Path) -> dict[str, Any]:
         "context-warm",
         "context-watch",
         "agent-supervisor",
+        "history-memory",
         "gemini-workspace-brief",
     ):
         definition = service_manager.get_definition(name)

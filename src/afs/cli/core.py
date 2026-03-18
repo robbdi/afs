@@ -6,10 +6,12 @@ import argparse
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from ..context_paths import resolve_mount_root
+from ..memory_consolidation import consolidate_history_to_memory
 from ..models import MountType
 from ._utils import (
     build_config,
@@ -454,6 +456,60 @@ def hivemind_list_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def memory_consolidate_command(args: argparse.Namespace) -> int:
+    """Consolidate recent history into durable memory entries."""
+    config_path = (
+        Path(args.config).expanduser().resolve()
+        if getattr(args, "config", None)
+        else None
+    )
+    manager = load_manager(config_path)
+    context_path = _resolve_command_context(args)
+    result = consolidate_history_to_memory(
+        context_path,
+        config=manager.config,
+        max_events_per_run=args.max_events,
+        max_events_per_entry=args.max_events_per_entry,
+        include_event_types=args.event_types,
+        write_markdown=not args.no_markdown,
+    )
+
+    if args.json:
+        print(json.dumps(result.to_dict(), indent=2))
+        return 0
+
+    age = "n/a"
+    if result.last_timestamp:
+        try:
+            normalized = result.last_timestamp.replace("Z", "+00:00")
+            last_seen = datetime.fromisoformat(normalized)
+            if last_seen.tzinfo is None:
+                last_seen = last_seen.replace(tzinfo=timezone.utc)
+            age = str(int((datetime.now(timezone.utc) - last_seen).total_seconds()))
+        except ValueError:
+            age = "n/a"
+
+    print(f"context_root: {result.context_root}")
+    print(f"history_root: {result.history_root}")
+    print(f"memory_root: {result.memory_root}")
+    print(f"entries_path: {result.entries_path}")
+    print(f"checkpoint: {result.checkpoint_path}")
+    print()
+    print(
+        "consolidation: "
+        f"scanned={result.scanned_events} "
+        f"consolidated={result.consolidated_events} "
+        f"entries={result.entries_written} "
+        f"markdown={result.markdown_written} "
+        f"last_age={age}s"
+    )
+    if result.notes:
+        print("notes:")
+        for note in result.notes:
+            print(f"  - {note}")
+    return 0
+
+
 def agents_run_command(args: argparse.Namespace) -> int:
     """Run a built-in agent."""
     from ..agents import get_agent
@@ -732,12 +788,14 @@ def status_command(args: argparse.Namespace) -> int:
     warm = maintenance["reports"]["context_warm"]
     watch = maintenance["reports"]["context_watch"]
     agent_supervisor = maintenance["reports"]["agent_supervisor"]
+    history_memory = maintenance["reports"]["history_memory"]
     print()
     print(
         "  maintenance: "
         f"context_warm={warm['status'] or 'unknown'} "
         f"context_watch={watch['status'] or 'unknown'} "
         f"agent_supervisor={agent_supervisor['status'] or 'unknown'} "
+        f"history_memory={history_memory['status'] or 'unknown'} "
         f"degraded_contexts={maintenance['degraded_contexts']} "
         f"remapped_mounts={maintenance['remapped_mounts']}"
     )
@@ -874,6 +932,38 @@ def register_parsers(subparsers: argparse._SubParsersAction) -> None:
     tasks_ls.add_argument("--status", help="Filter by status.")
     tasks_ls.add_argument("--json", action="store_true", help="Output JSON.")
     tasks_ls.set_defaults(func=tasks_list_command)
+
+    # memory
+    memory_parser = subparsers.add_parser("memory", help="Durable memory maintenance.")
+    memory_sub = memory_parser.add_subparsers(dest="memory_command")
+    memory_consolidate = memory_sub.add_parser(
+        "consolidate",
+        help="Consolidate recent history into durable memory entries.",
+    )
+    add_context_args(memory_consolidate)
+    memory_consolidate.add_argument(
+        "--max-events",
+        type=int,
+        help="Maximum history events to consolidate.",
+    )
+    memory_consolidate.add_argument(
+        "--max-events-per-entry",
+        type=int,
+        help="Maximum history events per memory entry.",
+    )
+    memory_consolidate.add_argument(
+        "--event-type",
+        action="append",
+        dest="event_types",
+        help="Limit consolidation to specific history event types.",
+    )
+    memory_consolidate.add_argument(
+        "--no-markdown",
+        action="store_true",
+        help="Skip writing markdown summaries.",
+    )
+    memory_consolidate.add_argument("--json", action="store_true", help="Output JSON.")
+    memory_consolidate.set_defaults(func=memory_consolidate_command)
 
     # hivemind
     hivemind_parser = subparsers.add_parser("hivemind", help="Inter-agent message bus.")
