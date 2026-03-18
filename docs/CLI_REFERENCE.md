@@ -57,6 +57,26 @@ Also supported once installed into the active environment:
 ./scripts/afs context unmount knowledge docs
 ```
 
+## Review
+
+`review` now operates on the active context instead of a separate
+`~/.context/projects/...` tree. Pending drafts live under the context
+scratchpad at `review/<category>/`.
+
+```bash
+./scripts/afs review list --path ~/src/project-a
+./scripts/afs review approve --path ~/src/project-a draft.md
+./scripts/afs review reject --path ~/src/project-a draft.md --reason "needs revision"
+```
+
+Approved plans move into `memory/reviewed/plans/`. Other approved review
+documents move into `history/reviewed/<category>/`. Rejections are archived
+under `history/rejected/<category>/`.
+
+For compatibility, `./scripts/afs review approve project-a draft.md` still
+works when `project-a` can be resolved from configured
+`general.workspace_directories`.
+
 ## Workspace
 
 ```bash
