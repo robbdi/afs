@@ -26,6 +26,7 @@ class AgentResult:
     started_at: str
     finished_at: str
     duration_seconds: float
+    task: str = ""
     metrics: dict[str, float | int] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
     payload: dict[str, Any] = field(default_factory=dict)
@@ -37,6 +38,7 @@ class AgentResult:
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "duration_seconds": self.duration_seconds,
+            "task": self.task,
             "metrics": dict(self.metrics),
             "notes": list(self.notes),
             "payload": dict(self.payload),
@@ -117,6 +119,22 @@ def emit_result(
         output_path = output_path.expanduser().resolve()
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(text, encoding="utf-8")
+
+    try:
+        from ..agent_registry import AgentRegistry
+
+        AgentRegistry().mark_result(
+            name=result.name,
+            status=result.status,
+            task=result.task,
+            started_at=result.started_at,
+            finished_at=result.finished_at,
+            output_path=str(output_path) if output_path else "",
+            last_error=str(result.payload.get("error", "") or ""),
+            metadata={"duration_seconds": result.duration_seconds},
+        )
+    except Exception:
+        logging.getLogger(__name__).debug("failed to update agent registry", exc_info=True)
 
     if force_stdout or sys.stdout.isatty():
         print(text, end="")

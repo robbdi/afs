@@ -13,6 +13,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from ..config import load_config_model
 from ..context_paths import resolve_agent_output_root
@@ -184,6 +185,56 @@ class AgentSupervisor:
             encoding="utf-8",
         )
 
+    def _context_root_str(self) -> str:
+        resolved_config = self._config or load_config_model(merge_user=True)
+        return str(resolved_config.general.context_root.expanduser().resolve())
+
+    def _resolve_task(self, name: str, module: str, agent_config: AgentConfig | None) -> str:
+        from ..agent_registry import resolve_agent_task
+
+        description = agent_config.description if agent_config is not None else ""
+        return resolve_agent_task(name, module=module, description=description)
+
+    def _update_registry(
+        self,
+        agent: RunningAgent,
+        *,
+        task: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        from ..agent_registry import ACTIVE_AGENT_STATES, AgentRegistry
+
+        AgentRegistry().update(
+            name=agent.name,
+            status=agent.state,
+            task=task,
+            module=agent.module,
+            context_root=self._context_root_str(),
+            started_at=agent.started_at,
+            finished_at=agent.stopped_at if agent.state not in ACTIVE_AGENT_STATES else "",
+            last_output_at=agent.last_seen_at,
+            last_error=agent.last_error,
+            pid=agent.pid,
+            metadata=metadata,
+        )
+
+    def _registry_completion(self, agent: RunningAgent) -> dict[str, Any] | None:
+        from ..agent_registry import ACTIVE_AGENT_STATES, AgentRegistry
+
+        entry = AgentRegistry().get(agent.name, context_root=self._context_root_str())
+        if entry is None:
+            return None
+        status = str(entry.get("status", ""))
+        if status in ACTIVE_AGENT_STATES:
+            return None
+        entry_output = _parse_timestamp(str(entry.get("last_output_at", "") or ""))
+        agent_started = _parse_timestamp(agent.started_at)
+        if entry_output is None:
+            return None
+        if agent_started is not None and entry_output < agent_started:
+            return None
+        return entry
+
     def _read_state(self, name: str) -> RunningAgent | None:
         path = self._state_path(name)
         if not path.exists():
@@ -219,12 +270,35 @@ class AgentSupervisor:
 
     def _refresh_state(self, agent: RunningAgent) -> RunningAgent:
         if agent.pid and not self._pid_alive(agent.pid):
+            completion = self._registry_completion(agent)
+            if completion is not None:
+                completion_status = str(completion.get("status", ""))
+                agent.state = "failed" if completion_status in {"error", "failed"} else "stopped"
+                agent.pid = None
+                agent.stopped_at = str(completion.get("finished_at", "") or now_iso())
+                agent.last_seen_at = str(
+                    completion.get("last_output_at", "")
+                    or completion.get("updated_at", "")
+                    or agent.stopped_at
+                )
+                agent.last_error = str(completion.get("last_error", "") or "")
+                self._write_state(agent)
+                self._update_registry(
+                    agent,
+                    task=str(completion.get("task", "") or ""),
+                    metadata=completion.get("metadata")
+                    if isinstance(completion.get("metadata"), dict)
+                    else None,
+                )
+                return agent
+
             agent.state = "failed"
             agent.pid = None
             agent.last_seen_at = now_iso()
             if not agent.last_error:
                 agent.last_error = "process exited"
             self._write_state(agent)
+            self._update_registry(agent)
         return agent
 
     def _build_agent_env(
@@ -331,6 +405,11 @@ class AgentSupervisor:
                 launch_count=launch_count,
             )
             self._write_state(agent)
+            self._update_registry(
+                agent,
+                task=self._resolve_task(name, module, agent_config),
+                metadata={"launch_reason": reason},
+            )
             raise RuntimeError(f"Failed to spawn agent {name}: {exc}") from exc
 
         agent = RunningAgent(
@@ -345,6 +424,11 @@ class AgentSupervisor:
             launch_count=launch_count,
         )
         self._write_state(agent)
+        self._update_registry(
+            agent,
+            task=self._resolve_task(name, module, agent_config),
+            metadata={"launch_reason": reason},
+        )
         return agent
 
     def stop(self, name: str) -> bool:
@@ -361,6 +445,7 @@ class AgentSupervisor:
         agent.last_seen_at = agent.stopped_at
         agent.manually_stopped = True
         self._write_state(agent)
+        self._update_registry(agent)
         return True
 
     def list_agents(self) -> list[RunningAgent]:
@@ -394,6 +479,7 @@ class AgentSupervisor:
         agent.last_event = "review_requested"
         agent.last_seen_at = now_iso()
         self._write_state(agent)
+        self._update_registry(agent)
         return True
 
     def approve_review(self, name: str) -> bool:
@@ -409,6 +495,7 @@ class AgentSupervisor:
         agent.last_event = "review_approved"
         agent.last_seen_at = agent.stopped_at
         self._write_state(agent)
+        self._update_registry(agent)
         return True
 
     def reject_review(self, name: str) -> bool:
@@ -424,6 +511,7 @@ class AgentSupervisor:
         agent.last_event = "review_rejected"
         agent.last_seen_at = now_iso()
         self._write_state(agent)
+        self._update_registry(agent)
         return True
 
     def auto_start(self, agent_configs: list[AgentConfig]) -> list[RunningAgent]:

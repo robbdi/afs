@@ -19,6 +19,7 @@ from ..health import cli as health_cli
 from ..history import log_cli_invocation
 from ..profiles import resolve_active_profile
 from . import (
+    briefing,
     bundle,
     context,
     core,
@@ -124,6 +125,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Register profile switching commands
     profile.register_parsers(subparsers)
+
+    # Register briefing command
+    briefing.register_parsers(subparsers)
 
     # Register review commands
     review.register_parsers(subparsers)

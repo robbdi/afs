@@ -1196,8 +1196,27 @@ def _tool_review_reject(arguments: dict[str, Any], manager: AFSManager) -> dict[
     return {"name": name.strip(), "rejected": rejected}
 
 
+def _tool_briefing(arguments: dict[str, Any], manager: AFSManager) -> dict[str, Any]:
+    """Run morning briefing and return structured data."""
+    from .cli.briefing import _build_briefing
+    days = arguments.get("days", 7)
+    return _build_briefing(days=days)
+
+
 def _builtin_tool_definitions() -> list[MCPToolDefinition]:
     return [
+        MCPToolDefinition(
+            name="briefing",
+            description="Morning briefing — git velocity across all projects, stale project alerts, carry-over items, open tasks, and active agents. Use at the start of a session to understand current state.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "days": {"type": "integer", "default": 7, "description": "Lookback window in days."},
+                },
+                "additionalProperties": False,
+            },
+            handler=_tool_briefing,
+        ),
         MCPToolDefinition(
             name="fs.read",
             description="Read UTF-8 text from a context-scoped file. Prefer this after `afs.session.bootstrap` or `context.status` so reads stay anchored in the active context.",

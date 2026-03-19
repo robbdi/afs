@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import signal
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
+from afs.agent_registry import AgentRegistry
 from afs.agents.supervisor import AgentSupervisor
 from afs.schema import (
     AFSConfig,
@@ -14,6 +19,11 @@ from afs.schema import (
     GeneralConfig,
     default_directory_configs,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolated_agent_registry(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("AFS_AGENT_REGISTRY_PATH", str(tmp_path / "agent_registry.json"))
 
 
 def _remap_directories(**overrides: str) -> list[DirectoryConfig]:
@@ -50,9 +60,13 @@ def test_supervisor_stop_unknown(tmp_path: Path) -> None:
     assert supervisor.stop("nonexistent") is False
 
 
-def test_supervisor_spawn_and_status(tmp_path: Path) -> None:
+def test_supervisor_spawn_and_status(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
     state_dir = tmp_path / "state"
-    supervisor = AgentSupervisor(state_dir=state_dir)
+    supervisor = AgentSupervisor(
+        state_dir=state_dir,
+        config=AFSConfig(general=GeneralConfig(context_root=tmp_path / "context")),
+    )
 
     # Mock Popen to avoid actually launching a process
     mock_proc = type("MockProc", (), {"pid": 99999})()
@@ -72,11 +86,21 @@ def test_supervisor_spawn_and_status(tmp_path: Path) -> None:
         status = supervisor.status("test-agent")
     assert status is not None
     assert status.state == "running"
+    registry_path = tmp_path / "agent_registry.json"
+    assert registry_path.exists()
+    entries = json.loads(registry_path.read_text(encoding="utf-8"))
+    assert entries[0]["name"] == "test-agent"
+    assert entries[0]["status"] == "running"
+    assert entries[0]["task"].startswith("Sync workspace paths")
 
 
-def test_supervisor_spawn_and_stop(tmp_path: Path) -> None:
+def test_supervisor_spawn_and_stop(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
     state_dir = tmp_path / "state"
-    supervisor = AgentSupervisor(state_dir=state_dir)
+    supervisor = AgentSupervisor(
+        state_dir=state_dir,
+        config=AFSConfig(general=GeneralConfig(context_root=tmp_path / "context")),
+    )
 
     mock_proc = type("MockProc", (), {"pid": 88888})()
     with patch("subprocess.Popen", return_value=mock_proc):
@@ -99,6 +123,8 @@ def test_supervisor_spawn_and_stop(tmp_path: Path) -> None:
     assert status is not None
     assert status.state == "stopped"
     assert status.manually_stopped is True
+    entries = json.loads((tmp_path / "agent_registry.json").read_text(encoding="utf-8"))
+    assert entries[0]["status"] == "stopped"
 
 
 def test_supervisor_list_detects_dead_pid(tmp_path: Path) -> None:
@@ -120,6 +146,36 @@ def test_supervisor_list_detects_dead_pid(tmp_path: Path) -> None:
     with patch.object(supervisor, "_pid_alive", return_value=False):
         running = supervisor.list_running()
     assert len(running) == 0
+
+
+def test_supervisor_uses_registry_completion_for_clean_exit(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    context_root = tmp_path / "context"
+    supervisor = AgentSupervisor(
+        state_dir=tmp_path / "state",
+        config=AFSConfig(general=GeneralConfig(context_root=context_root)),
+    )
+
+    mock_proc = type("MockProc", (), {"pid": 77777})()
+    with patch("subprocess.Popen", return_value=mock_proc):
+        spawned = supervisor.spawn("clean-exit", "afs.agents.context_warm")
+
+    AgentRegistry().mark_result(
+        name="clean-exit",
+        status="ok",
+        task="Sync workspace paths, discover contexts, and refresh embeddings.",
+        started_at=spawned.started_at,
+        finished_at=(datetime.fromisoformat(spawned.started_at) + timedelta(seconds=10)).isoformat(),
+    )
+
+    with patch.object(supervisor, "_pid_alive", return_value=False):
+        status = supervisor.status("clean-exit")
+
+    assert status is not None
+    assert status.state == "stopped"
 
 
 def test_supervisor_auto_start(tmp_path: Path) -> None:
