@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from argparse import Namespace
 from pathlib import Path
 
@@ -100,6 +101,34 @@ def test_status_command_json_reports_index_and_mount_counts(
     assert payload["index"]["has_entries"] is True
     assert payload["index"]["total_entries"] >= 1
     assert "maintenance" in payload
+
+
+def test_context_index_rebuild_is_visible_to_fresh_connections(tmp_path: Path) -> None:
+    config, context_root = _build_context(tmp_path)
+    scratchpad = context_root / "scratchpad"
+    for index in range(64):
+        (scratchpad / f"note_{index:03d}.md").write_text(
+            f"checkpoint visibility {index}",
+            encoding="utf-8",
+        )
+
+    manager = AFSManager(config=config)
+    index = ContextSQLiteIndex(manager, context_root)
+    summary = index.rebuild(
+        mount_types=[MountType.SCRATCHPAD, MountType.KNOWLEDGE],
+        include_content=True,
+    )
+
+    with sqlite3.connect(index.db_path, timeout=5.0) as connection:
+        row_count = connection.execute(
+            "SELECT COUNT(1) FROM file_index WHERE context_path = ?",
+            (str(context_root),),
+        ).fetchone()[0]
+
+    assert row_count == summary.rows_written
+    wal_path = Path(f"{index.db_path}-wal")
+    if wal_path.exists():
+        assert wal_path.stat().st_size == 0
 
 
 def test_agents_watch_command_uses_remapped_history_dir(

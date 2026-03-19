@@ -164,9 +164,10 @@ class ContextSQLiteIndex:
                 rows.append(row)
                 by_mount_type[mount_type.value] = by_mount_type.get(mount_type.value, 0) + 1
 
-        rows_deleted = self._delete_rows_for_mounts(selected_mounts)
-        if rows:
-            with self._connect() as connection:
+        rows_deleted = 0
+        with self._connect() as connection:
+            rows_deleted = self._delete_rows_for_mounts(selected_mounts, connection=connection)
+            if rows:
                 connection.executemany(
                     """
                     INSERT INTO file_index (
@@ -184,7 +185,7 @@ class ContextSQLiteIndex:
                     """,
                     rows,
                 )
-                connection.commit()
+            self._commit_mutation(connection, truncate_wal=True)
 
         return IndexSummary(
             context_path=str(self._context_path),
@@ -246,7 +247,7 @@ class ContextSQLiteIndex:
                 """,
                 row,
             )
-            connection.commit()
+            self._commit_mutation(connection)
         return True
 
     def sync_absolute_path(
@@ -299,7 +300,7 @@ class ContextSQLiteIndex:
                 """,
                 (str(self._context_path), mount_type.value, normalized),
             )
-            connection.commit()
+            self._commit_mutation(connection)
             if cursor.rowcount is None or cursor.rowcount < 0:
                 return 0
             return int(cursor.rowcount)
@@ -327,7 +328,7 @@ class ContextSQLiteIndex:
                     f"{normalized}/%",
                 ),
             )
-            connection.commit()
+            self._commit_mutation(connection)
             if cursor.rowcount is None or cursor.rowcount < 0:
                 return 0
             return int(cursor.rowcount)
@@ -854,6 +855,7 @@ class ContextSQLiteIndex:
         with self._connect() as connection:
             connection.execute("PRAGMA journal_mode=WAL")
             connection.execute("PRAGMA synchronous=NORMAL")
+            connection.execute("PRAGMA wal_autocheckpoint=1")
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS file_index (
@@ -890,6 +892,7 @@ class ContextSQLiteIndex:
                 """
             )
             self._fts_enabled = self._initialize_fts(connection)
+            self._repair_checkpoint_visibility(connection)
             connection.commit()
 
     def _initialize_fts(self, connection: sqlite3.Connection) -> bool:
@@ -946,28 +949,76 @@ class ContextSQLiteIndex:
         except sqlite3.OperationalError:
             return False
 
-    def _delete_rows_for_mounts(self, mount_types: list[MountType]) -> int:
+    def _repair_checkpoint_visibility(self, connection: sqlite3.Connection) -> None:
+        if not self._fts_enabled:
+            return
+        row_count = connection.execute("SELECT COUNT(1) FROM file_index").fetchone()[0]
+        fts_count = connection.execute("SELECT COUNT(1) FROM file_index_fts").fetchone()[0]
+        if row_count != 0 or fts_count == 0:
+            return
+        self._checkpoint_wal(connection, truncate=True)
+
+    def _delete_rows_for_mounts(
+        self,
+        mount_types: list[MountType],
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> int:
         if not mount_types:
             return 0
         placeholders = ", ".join("?" for _ in mount_types)
         params = [str(self._context_path), *[mount.value for mount in mount_types]]
-        with self._connect() as connection:
-            cursor = connection.execute(
-                f"""
-                DELETE FROM file_index
-                WHERE context_path = ?
-                  AND mount_type IN ({placeholders})
-                """,
-                params,
-            )
-            connection.commit()
-            if cursor.rowcount is None or cursor.rowcount < 0:
-                return 0
-            return int(cursor.rowcount)
+        if connection is None:
+            with self._connect() as owned_connection:
+                cursor = owned_connection.execute(
+                    f"""
+                    DELETE FROM file_index
+                    WHERE context_path = ?
+                      AND mount_type IN ({placeholders})
+                    """,
+                    params,
+                )
+                self._commit_mutation(owned_connection)
+                if cursor.rowcount is None or cursor.rowcount < 0:
+                    return 0
+                return int(cursor.rowcount)
+        cursor = connection.execute(
+            f"""
+            DELETE FROM file_index
+            WHERE context_path = ?
+              AND mount_type IN ({placeholders})
+            """,
+            params,
+        )
+        if cursor.rowcount is None or cursor.rowcount < 0:
+            return 0
+        return int(cursor.rowcount)
+
+    def _commit_mutation(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        truncate_wal: bool = False,
+    ) -> None:
+        connection.commit()
+        self._checkpoint_wal(connection, truncate=truncate_wal)
+
+    def _checkpoint_wal(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        truncate: bool = False,
+    ) -> None:
+        mode = "TRUNCATE" if truncate else "PASSIVE"
+        try:
+            connection.execute(f"PRAGMA wal_checkpoint({mode})").fetchone()
+        except sqlite3.OperationalError:
+            pass
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self._db_path)
+        connection = sqlite3.connect(self._db_path, timeout=5.0)
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA busy_timeout=5000")
         return connection
 
     @staticmethod
