@@ -577,12 +577,12 @@ def _matches_patterns(
     exclude_patterns: list[str],
     include_hidden: bool,
 ) -> bool:
-    if not include_hidden and any(part.startswith(".") for part in path.parts):
-        return False
     try:
         rel = path.relative_to(root).as_posix()
     except ValueError:
         rel = path.name
+    if not include_hidden and any(part.startswith(".") for part in Path(rel).parts):
+        return False
     if rel in ("", "."):
         rel = path.name
     if exclude_patterns and any(fnmatch.fnmatch(rel, pattern) for pattern in exclude_patterns):
