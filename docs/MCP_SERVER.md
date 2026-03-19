@@ -18,12 +18,28 @@ python3 -m afs.mcp_server
 
 ## Gemini CLI Registration
 
+Preferred — use the built-in setup command:
+
+```bash
+afs gemini setup
+```
+
+This writes the AFS MCP entry into `~/.gemini/settings.json` automatically.
+
+Manual alternative:
+
 ```bash
 gemini mcp add afs /Users/scawful/src/lab/afs/scripts/afs mcp serve
 ```
 
 If Gemini is running inside an environment where `afs` is already installed,
 `python3 -m afs.mcp_server` also works.
+
+Verify registration:
+
+```bash
+afs gemini status
+```
 
 ## Codex Registration
 

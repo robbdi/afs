@@ -46,6 +46,33 @@ Run the MCP server for Gemini/other MCP clients:
 afs mcp serve
 ```
 
+## Gemini Integration
+
+AFS has first-class Gemini support: embeddings, MCP registration, and context generation.
+
+```bash
+# One-time setup — registers AFS MCP in ~/.gemini/settings.json
+afs gemini setup
+
+# Check readiness (API key, SDK, MCP, embeddings)
+afs gemini status
+
+# Index knowledge with Gemini embedding vectors
+afs embeddings index --knowledge-path ~/.context/knowledge --provider gemini --include "*.md"
+
+# Semantic search
+afs embeddings search --knowledge-path ~/.context/knowledge --provider gemini "how to debug a sprite"
+
+# Generate context for a Gemini session
+afs gemini context "sprite development"                    # search mode
+afs gemini context "sprite development" --include-content  # with full content
+afs gemini context                                         # full knowledge index
+```
+
+Install the optional Gemini dependency: `pip install -e ".[gemini]"`
+
+See `docs/EMBEDDINGS.md` for the full embedding system reference.
+
 Tune context index defaults in `afs.toml`:
 
 ```toml

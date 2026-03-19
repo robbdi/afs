@@ -139,9 +139,62 @@ It also refreshes:
 ## Embeddings
 
 ```bash
-./scripts/afs embeddings index --knowledge-dir ~/.context/knowledge/work --source ~/.context/knowledge/work
-./scripts/afs embeddings search "workspace policy" --knowledge-dir ~/.context/knowledge/work
+# Index with keyword-only (no embedding provider needed)
+./scripts/afs embeddings index --knowledge-path ~/.context/knowledge --provider none --include "*.md"
+
+# Index with Gemini vectors (requires GEMINI_API_KEY)
+./scripts/afs embeddings index --knowledge-path ~/.context/knowledge --provider gemini --include "*.md"
+
+# Index with other providers
+./scripts/afs embeddings index --knowledge-path ~/.context/knowledge --provider ollama
+./scripts/afs embeddings index --knowledge-path ~/.context/knowledge --provider openai --model text-embedding-3-small
+./scripts/afs embeddings index --knowledge-path ~/.context/knowledge --provider hf --model nomic-embed-text
+
+# Semantic search (auto-uses RETRIEVAL_QUERY for Gemini asymmetric retrieval)
+./scripts/afs embeddings search --knowledge-path ~/.context/knowledge --provider gemini "how to debug a sprite"
+
+# Keyword search (no provider needed if index exists)
+./scripts/afs embeddings search --knowledge-path ~/.context/knowledge --provider none "sprite RAM tables"
+
+# Evaluate retrieval quality
+./scripts/afs embeddings eval --knowledge-path ~/.context/knowledge --provider gemini --query-file eval_cases.jsonl
 ```
+
+Embedding providers: `none` (keyword-only), `ollama`, `hf` (HuggingFace), `openai`, `gemini`.
+
+For Gemini, the system auto-selects the correct task type: `RETRIEVAL_DOCUMENT` for
+indexing, `RETRIEVAL_QUERY` for search queries (asymmetric retrieval). Override with
+`--gemini-task-type`.
+
+## Gemini
+
+```bash
+# Set up Gemini settings.json with AFS MCP server
+./scripts/afs gemini setup
+./scripts/afs gemini setup --force                    # overwrite existing entry
+./scripts/afs gemini setup --settings-path ~/custom/settings.json
+
+# Check integration health
+./scripts/afs gemini status
+./scripts/afs gemini status --json
+./scripts/afs gemini status --skip-ping               # skip live embedding test
+
+# Generate context from knowledge base
+./scripts/afs gemini context                           # dump full INDEX.md
+./scripts/afs gemini context "sprite development"      # search for relevant docs
+./scripts/afs gemini context "debugging" --top-k 3     # limit results
+./scripts/afs gemini context "hooks" --include-content  # include full doc text
+./scripts/afs gemini context "training" --json          # machine-readable output
+```
+
+`afs gemini setup` writes the AFS MCP server entry into `~/.gemini/settings.json`
+so Gemini CLI can discover AFS tools automatically.
+
+`afs gemini status` checks: API key, google-genai SDK, settings.json, MCP registration,
+embedding index, and live embedding ping.
+
+`afs gemini context` generates context from the knowledge base using semantic search
+(when embeddings are indexed) or dumps the full knowledge INDEX.md.
 
 ## MCP
 

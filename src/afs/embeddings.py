@@ -12,7 +12,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-
 EmbeddingFactory = Callable[..., Callable[[str], list[float]]]
 _EMBEDDING_BACKENDS: dict[str, EmbeddingFactory] = {}
 

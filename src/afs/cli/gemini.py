@@ -15,12 +15,8 @@ from pathlib import Path
 from typing import Any
 
 from ..config import load_config_model
-from ..context_paths import resolve_mount_root
-from ..core import resolve_context_root
 from ..health.mcp_registration import find_afs_mcp_registrations
-from ..models import MountType
 from ..profiles import resolve_active_profile
-
 
 # --------------------------------------------------------------------------- #
 # settings.json management
@@ -230,7 +226,7 @@ def gemini_context_command(args: argparse.Namespace) -> int:
         # Semantic/keyword search mode — prefer indexed mounts
         knowledge_root = indexed_roots[0] if indexed_roots else accessible_roots[0]
         if not indexed_roots:
-            print(f"No embedding index found. Run: afs embeddings index first.")
+            print("No embedding index found. Run: afs embeddings index first.")
             return 1
         return _context_search(knowledge_root, args)
     else:
@@ -243,7 +239,7 @@ def gemini_context_command(args: argparse.Namespace) -> int:
 
 def _context_search(knowledge_root: Path, args: argparse.Namespace) -> int:
     """Generate context by searching the knowledge base."""
-    from ..embeddings import build_embedding_index, search_embedding_index, create_embed_fn
+    from ..embeddings import create_embed_fn, search_embedding_index
 
     # Check if index exists
     index_path = knowledge_root / "embedding_index.json"

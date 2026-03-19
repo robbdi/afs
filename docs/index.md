@@ -39,6 +39,7 @@ It provides filesystem-native primitives for:
 - [Profiles and Hooks](PROFILES.md)
 - [Extensions](PLUGINS.md)
 - [MCP Server](MCP_SERVER.md)
+- [Embeddings](EMBEDDINGS.md)
 - [VSCode Extension Review](VSCODE_EXTENSION_REVIEW.md)
 - [Memory and Context Layout](MEMORY_SYSTEM.md)
 - [CLI Reference](CLI_REFERENCE.md)
