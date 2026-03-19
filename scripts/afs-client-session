@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "$#" -lt 3 ]; then
+  echo "usage: afs-client-session <client-label> <default-command> <env-var> [--bootstrap-only] [client-args...]" >&2
+  exit 2
+fi
+
+CLIENT_LABEL="$1"
+DEFAULT_COMMAND="$2"
+COMMAND_ENV_VAR="$3"
+shift 3
+
+BOOTSTRAP_ONLY=0
+if [ "${1:-}" = "--bootstrap-only" ]; then
+  BOOTSTRAP_ONLY=1
+  shift
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AFS_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+AFS_CLI="${AFS_ROOT}/scripts/afs"
+
+export AFS_ROOT
+export AFS_CLI
+export AFS_SESSION_CLIENT="${CLIENT_LABEL}"
+
+find_repo_config() {
+  local dir="$PWD"
+  while [ "$dir" != "/" ]; do
+    if [ -f "$dir/afs.toml" ]; then
+      printf '%s\n' "$dir/afs.toml"
+      return 0
+    fi
+    dir="$(dirname "$dir")"
+  done
+  return 1
+}
+
+if [ -z "${AFS_CONFIG_PATH:-}" ]; then
+  if repo_config="$(find_repo_config)"; then
+    export AFS_CONFIG_PATH="$repo_config"
+  fi
+fi
+
+export AFS_PREFER_REPO_CONFIG="${AFS_PREFER_REPO_CONFIG:-1}"
+if [ "${AFS_PREFER_REPO_CONFIG}" = "1" ]; then
+  export AFS_PREFER_USER_CONFIG=0
+fi
+
+if [ "${CLIENT_LABEL}" = "gemini" ] && [ -d "/google" ] && [ -z "${AFS_MCP_ALLOWED_ROOTS:-}" ]; then
+  export AFS_MCP_ALLOWED_ROOTS="/google"
+fi
+
+BOOTSTRAP_JSON_PAYLOAD="$("${AFS_CLI}" session bootstrap --json 2>/dev/null || true)"
+if [ -n "${BOOTSTRAP_JSON_PAYLOAD}" ]; then
+  readarray -t bootstrap_fields < <(
+    python3 - "${BOOTSTRAP_JSON_PAYLOAD}" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+artifacts = payload.get("artifact_paths") or {}
+print(artifacts.get("json", ""))
+print(artifacts.get("markdown", ""))
+print(payload.get("context_path", ""))
+PY
+  )
+  export AFS_SESSION_BOOTSTRAP_JSON="${bootstrap_fields[0]:-}"
+  export AFS_SESSION_BOOTSTRAP_MARKDOWN="${bootstrap_fields[1]:-}"
+  export AFS_ACTIVE_CONTEXT_ROOT="${bootstrap_fields[2]:-}"
+fi
+
+if [ -n "${AFS_SESSION_BOOTSTRAP_MARKDOWN:-}" ]; then
+  echo "AFS bootstrap (${CLIENT_LABEL}): ${AFS_SESSION_BOOTSTRAP_MARKDOWN}" >&2
+fi
+if [ -n "${AFS_CONFIG_PATH:-}" ]; then
+  echo "AFS config (${CLIENT_LABEL}): ${AFS_CONFIG_PATH}" >&2
+fi
+
+if [ "${BOOTSTRAP_ONLY}" = "1" ]; then
+  exit 0
+fi
+
+CLIENT_COMMAND="${!COMMAND_ENV_VAR:-${DEFAULT_COMMAND}}"
+if ! command -v "${CLIENT_COMMAND}" >/dev/null 2>&1; then
+  echo "client command not found: ${CLIENT_COMMAND}" >&2
+  echo "set ${COMMAND_ENV_VAR} to override the executable path" >&2
+  exit 127
+fi
+
+exec "${CLIENT_COMMAND}" "$@"

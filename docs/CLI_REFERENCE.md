@@ -92,6 +92,27 @@ metadata-first history events, writes durable summaries into
 `memory/history_consolidation/`, and checkpoints incremental progress under
 `.context/scratchpad/afs_agents/history_memory_checkpoint.json`.
 
+## Session
+
+```bash
+./scripts/afs session bootstrap
+./scripts/afs session bootstrap --json
+```
+
+`session bootstrap` is the preferred start-of-session surface. It combines:
+
+- `context.status`
+- `context.diff`
+- scratchpad state and deferred notes
+- queued tasks from `items/`
+- recent `hivemind/` messages
+- latest durable memory summary
+
+It also refreshes:
+
+- `.context/scratchpad/afs_agents/session_bootstrap.json`
+- `.context/scratchpad/afs_agents/session_bootstrap.md`
+
 ## Workspace
 
 ```bash
@@ -130,6 +151,7 @@ metadata-first history events, writes durable summaries into
 
 Useful Gemini-oriented MCP operations:
 
+- `afs.session.bootstrap` for the full session-start packet
 - `context.query` for indexed path/content search
 - `context.diff` for “what changed since the last index build”
 - `context.status` for mount counts, mount health, profile, and index health
@@ -209,6 +231,17 @@ Codex MCP config:
 command = "/Users/scawful/src/lab/afs/scripts/afs"
 args = ["mcp", "serve"]
 ```
+
+Client launch wrappers:
+
+```bash
+./scripts/afs-gemini
+./scripts/afs-claude
+./scripts/afs-codex
+```
+
+These wrappers prefer repo-local config, refresh the session bootstrap packet,
+and export the bootstrap artifact paths before launching the client.
 
 ## Health
 

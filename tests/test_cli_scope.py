@@ -27,6 +27,7 @@ def test_core_parser_excludes_legacy_model_command_groups(
     commands = _command_choices(parser)
 
     assert "context" in commands
+    assert "session" in commands
     assert "mcp" in commands
     assert "profile" in commands
     assert "skills" in commands

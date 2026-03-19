@@ -98,6 +98,7 @@ via mount fingerprints, including external renames that keep file counts stable.
 
 Gemini-facing MCP prompts:
 
+- `afs.session.bootstrap`
 - `afs.context.overview`
 - `afs.query.search`
 - `afs.scratchpad.review`
@@ -105,9 +106,14 @@ Gemini-facing MCP prompts:
 Gemini-facing MCP resources:
 
 - `afs://contexts`
+- `afs://context/<path>/bootstrap`
 - `afs://context/<path>/metadata`
 - `afs://context/<path>/mounts`
 - `afs://context/<path>/index`
+
+`afs.session.bootstrap` is the recommended first call in a new session. It
+packages health, drift, scratchpad notes, task queue state, recent hivemind
+messages, and the latest durable memory summary into one startup packet.
 
 Index behavior can be tuned in `afs.toml`:
 
@@ -254,6 +260,21 @@ Gemini background brief surfaces:
 ```
 
 The brief agent requires `GEMINI_API_KEY` or `GOOGLE_API_KEY`.
+
+For interactive clients, prefer the launcher wrappers:
+
+```bash
+~/src/lab/afs/scripts/afs-gemini
+~/src/lab/afs/scripts/afs-claude
+~/src/lab/afs/scripts/afs-codex
+```
+
+They find the nearest `afs.toml`, refresh the session bootstrap artifact, and
+export:
+
+- `AFS_SESSION_BOOTSTRAP_JSON`
+- `AFS_SESSION_BOOTSTRAP_MARKDOWN`
+- `AFS_ACTIVE_CONTEXT_ROOT`
 
 `context-warm` now audits discovered contexts for broken symlink mounts,
 duplicate mount targets, missing profile-managed mounts, untracked/stale mount

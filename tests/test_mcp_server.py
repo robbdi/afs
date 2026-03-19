@@ -1137,6 +1137,7 @@ def test_resources_list_returns_contexts_resource(tmp_path: Path) -> None:
     resources = response["result"]["resources"]
     uris = [r["uri"] for r in resources]
     assert "afs://contexts" in uris
+    assert f"afs://context/{manager.config.general.context_root}/bootstrap" in uris
 
 
 def test_resources_read_contexts(tmp_path: Path) -> None:
@@ -1228,6 +1229,25 @@ def test_resources_read_index(tmp_path: Path) -> None:
     assert "needs_refresh" in data
 
 
+def test_resources_read_bootstrap(tmp_path: Path) -> None:
+    manager = _make_manager(tmp_path)
+    context_root = manager.config.general.context_root
+    (context_root / "scratchpad" / "state.md").write_text(
+        "bootstrap state",
+        encoding="utf-8",
+    )
+    uri = f"afs://context/{context_root}/bootstrap"
+    response = _handle_request(
+        {"jsonrpc": "2.0", "id": 124, "method": "resources/read", "params": {"uri": uri}},
+        manager,
+    )
+    assert response is not None
+    contents = response["result"]["contents"]
+    payload = json.loads(contents[0]["text"])
+    assert payload["context_path"] == str(context_root)
+    assert payload["scratchpad"]["state_text"] == "bootstrap state"
+
+
 def test_resources_read_unknown_uri(tmp_path: Path) -> None:
     manager = _make_manager(tmp_path)
     response = _handle_request(
@@ -1274,11 +1294,42 @@ def test_prompts_list_returns_expected_prompts(tmp_path: Path) -> None:
     assert response is not None
     prompts = response["result"]["prompts"]
     names = {p["name"] for p in prompts}
-    assert {"afs.context.overview", "afs.query.search", "afs.scratchpad.review"}.issubset(names)
+    assert {
+        "afs.session.bootstrap",
+        "afs.context.overview",
+        "afs.query.search",
+        "afs.scratchpad.review",
+    }.issubset(names)
     # Verify argument schemas
     for prompt in prompts:
         assert "arguments" in prompt
         assert isinstance(prompt["arguments"], list)
+
+
+def test_prompts_get_session_bootstrap(tmp_path: Path) -> None:
+    manager = _make_manager(tmp_path)
+    context_root = manager.config.general.context_root
+    (context_root / "scratchpad" / "state.md").write_text(
+        "bootstrap state",
+        encoding="utf-8",
+    )
+    response = _handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 125,
+            "method": "prompts/get",
+            "params": {
+                "name": "afs.session.bootstrap",
+                "arguments": {"context_path": str(context_root)},
+            },
+        },
+        manager,
+    )
+    assert response is not None
+    messages = response["result"]["messages"]
+    text = messages[0]["content"]["text"]
+    assert "AFS Session Bootstrap" in text
+    assert "bootstrap state" in text
 
 
 def test_prompts_get_context_overview(tmp_path: Path) -> None:

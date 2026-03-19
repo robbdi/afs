@@ -510,6 +510,42 @@ def memory_consolidate_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def session_bootstrap_command(args: argparse.Namespace) -> int:
+    """Build a proactive session bootstrap packet for the active context."""
+    from ..session_bootstrap import (
+        build_session_bootstrap,
+        render_session_bootstrap,
+        write_session_bootstrap_artifacts,
+    )
+
+    config_path = (
+        Path(args.config).expanduser().resolve()
+        if getattr(args, "config", None)
+        else None
+    )
+    manager = load_manager(config_path)
+    context_path = _resolve_command_context(args)
+    summary = build_session_bootstrap(
+        manager,
+        context_path,
+        task_limit=args.task_limit,
+        message_limit=args.message_limit,
+    )
+    if not args.no_write_artifacts:
+        summary["artifact_paths"] = write_session_bootstrap_artifacts(
+            manager,
+            context_path,
+            summary,
+        )
+
+    if args.json:
+        print(json.dumps(summary, indent=2))
+        return 0
+
+    print(render_session_bootstrap(summary))
+    return 0
+
+
 def agents_run_command(args: argparse.Namespace) -> int:
     """Run a built-in agent."""
     from ..agents import get_agent
@@ -964,6 +1000,37 @@ def register_parsers(subparsers: argparse._SubParsersAction) -> None:
     )
     memory_consolidate.add_argument("--json", action="store_true", help="Output JSON.")
     memory_consolidate.set_defaults(func=memory_consolidate_command)
+
+    # session
+    session_parser = subparsers.add_parser(
+        "session",
+        help="Session bootstrap and handoff helpers.",
+    )
+    session_sub = session_parser.add_subparsers(dest="session_command")
+    session_bootstrap = session_sub.add_parser(
+        "bootstrap",
+        help="Build a startup packet from context health, scratchpad, tasks, hivemind, and memory.",
+    )
+    add_context_args(session_bootstrap)
+    session_bootstrap.add_argument(
+        "--task-limit",
+        type=int,
+        default=10,
+        help="Maximum queued tasks to include.",
+    )
+    session_bootstrap.add_argument(
+        "--message-limit",
+        type=int,
+        default=10,
+        help="Maximum hivemind messages to include.",
+    )
+    session_bootstrap.add_argument(
+        "--no-write-artifacts",
+        action="store_true",
+        help="Do not update scratchpad/afs_agents/session_bootstrap.{json,md}.",
+    )
+    session_bootstrap.add_argument("--json", action="store_true", help="Output JSON.")
+    session_bootstrap.set_defaults(func=session_bootstrap_command)
 
     # hivemind
     hivemind_parser = subparsers.add_parser("hivemind", help="Inter-agent message bus.")

@@ -37,6 +37,7 @@ alias ap='afs agents ps'
 alias apa='afs agents ps --all'
 alias aw='afs agents watch'
 alias al='afs agents list'
+alias ab='afs session bootstrap'
 alias tl='afs tasks list'
 alias hm='afs hivemind list'
 alias sk='afs skills list'
@@ -82,6 +83,8 @@ afs-here() {
 afs-bootstrap() {
   local name="${1:-$(basename "$(pwd)")}"
   afs init --link-context --workspace-path . --workspace-name "$name"
+  echo ""
+  afs session bootstrap || true
   echo ""
   afs status
 }

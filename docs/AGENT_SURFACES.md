@@ -66,6 +66,7 @@ export AFS_VENV=~/src/lab/afs/.venv
 ```bash
 ~/src/lab/afs/scripts/afs context discover --path ~/src
 ~/src/lab/afs/scripts/afs context ensure-all --path ~/src
+~/src/lab/afs/scripts/afs session bootstrap --json
 ~/src/lab/afs/scripts/afs profile current
 ~/src/lab/afs/scripts/afs skills list --profile work
 ~/src/lab/afs/scripts/afs health
@@ -126,8 +127,29 @@ Paths are scoped to:
 
 Gemini-friendly prompts/resources are also exposed over MCP:
 
-- prompts: `afs.context.overview`, `afs.query.search`, `afs.scratchpad.review`
-- resources: `afs://contexts`, `afs://context/<path>/metadata`, `.../mounts`, `.../index`
+- prompts: `afs.session.bootstrap`, `afs.context.overview`, `afs.query.search`, `afs.scratchpad.review`
+- resources: `afs://contexts`, `afs://context/<path>/bootstrap`, `.../metadata`, `.../mounts`, `.../index`
+
+`afs.session.bootstrap` is the preferred start-of-session surface. It combines:
+
+- context health and index freshness
+- recent filesystem drift from `context.diff`
+- scratchpad state and deferred notes
+- queued `items` tasks
+- recent `hivemind` messages
+- latest durable memory summary
+
+The CLI equivalent is:
+
+```bash
+~/src/lab/afs/scripts/afs session bootstrap
+~/src/lab/afs/scripts/afs session bootstrap --json
+```
+
+The CLI also refreshes:
+
+- `.context/scratchpad/afs_agents/session_bootstrap.json`
+- `.context/scratchpad/afs_agents/session_bootstrap.md`
 
 Extensions can add their own MCP tools, prompts, and resources with
 `[mcp_server]` in `extension.toml`. Legacy tool-only factories under
@@ -267,6 +289,21 @@ Claude JSON config:
   }
 }
 ```
+
+Client bootstrap wrappers:
+
+```bash
+~/src/lab/afs/scripts/afs-gemini
+~/src/lab/afs/scripts/afs-claude
+~/src/lab/afs/scripts/afs-codex
+```
+
+Each wrapper:
+
+- prefers the nearest repo-local `afs.toml`
+- exports the latest bootstrap artifact paths
+- refreshes the session bootstrap snapshot before launching the client
+- biases Gemini toward `/google` when no explicit `AFS_MCP_ALLOWED_ROOTS` is set
 
 Antigravity raw config example:
 

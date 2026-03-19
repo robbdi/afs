@@ -21,7 +21,6 @@ from .context_index import (
     DEFAULT_MAX_CONTENT_CHARS,
     DEFAULT_MAX_FILE_SIZE_BYTES,
     ContextSQLiteIndex,
-    count_mount_files,
 )
 from .context_paths import resolve_mount_root
 from .discovery import discover_contexts
@@ -30,6 +29,12 @@ from .models import MountType
 from .plugins import load_enabled_extensions
 from .profiles import resolve_active_profile
 from .schema import ContextIndexConfig
+from .session_bootstrap import (
+    build_session_bootstrap,
+    collect_context_diff,
+    collect_context_status,
+    render_session_bootstrap,
+)
 
 SERVER_NAME = "afs"
 SERVER_VERSION = "0.1.0"
@@ -39,6 +44,7 @@ _CORE_RESOURCE_PREFIXES = ("afs://context/",)
 _CORE_PROMPT_NAMES = {
     "afs.context.overview",
     "afs.query.search",
+    "afs.session.bootstrap",
     "afs.scratchpad.review",
 }
 
@@ -401,11 +407,28 @@ def _resolve_prompt_context_path(arguments: dict[str, Any], manager: AFSManager)
 
 
 def _discover_allowed_contexts(manager: AFSManager) -> list[Any]:
+    contexts: list[Any] = []
     try:
         contexts = discover_contexts(config=manager.config)
     except Exception:
-        return []
-    return [ctx for ctx in contexts if _is_allowed_path(ctx.path, manager)]
+        contexts = []
+
+    default_context = manager.config.general.context_root
+    if default_context.exists():
+        try:
+            contexts.append(manager.list_context(context_path=default_context))
+        except Exception:
+            pass
+
+    allowed: list[Any] = []
+    seen: set[Path] = set()
+    for ctx in contexts:
+        resolved = ctx.path.expanduser().resolve()
+        if resolved in seen or not _is_allowed_path(resolved, manager):
+            continue
+        seen.add(resolved)
+        allowed.append(ctx)
+    return allowed
 
 
 def _context_candidates_for_path(path: Path, manager: AFSManager) -> list[Path]:
@@ -849,62 +872,13 @@ def _tool_context_diff(arguments: dict[str, Any], manager: AFSManager) -> dict[s
     """Show changes between filesystem and index."""
     context_path = _resolve_context_path(arguments, manager)
     mount_types = _parse_mount_types(arguments.get("mount_types"))
-    settings = _context_index_settings(manager)
-    if not settings.enabled:
-        return {"context_path": str(context_path), "error": "index disabled"}
-    index = ContextSQLiteIndex(manager, context_path)
-    if not index.has_entries(mount_types=mount_types):
-        return {
-            "context_path": str(context_path),
-            "error": "index empty — run context.index.rebuild first",
-        }
-    return index.diff(mount_types=mount_types)
+    return collect_context_diff(manager, context_path, mount_types=mount_types)
 
 
 def _tool_context_status(arguments: dict[str, Any], manager: AFSManager) -> dict[str, Any]:
     """Return a summary of the context: mounts, index health, profile."""
     context_path = _resolve_context_path(arguments, manager)
-    settings = _context_index_settings(manager)
-    mount_health = manager.context_health(context_path)
-
-    # Mount counts
-    mount_counts: dict[str, int] = {}
-    total_files = 0
-    for mount_type in MountType:
-        mount_dir = manager.resolve_mount_root(context_path, mount_type)
-        if not mount_dir.exists():
-            continue
-        count = count_mount_files(mount_dir)
-        if count > 0:
-            mount_counts[mount_type.value] = count
-            total_files += count
-
-    # Index stats
-    index_info: dict[str, Any] = {"enabled": settings.enabled}
-    if settings.enabled:
-        db_path = manager.resolve_mount_root(context_path, MountType.GLOBAL) / settings.db_filename
-        if db_path.exists():
-            try:
-                index = ContextSQLiteIndex(manager, context_path)
-                has = index.has_entries()
-                index_info["has_entries"] = has
-                index_info["total_entries"] = index.total_entries
-                index_info["stale"] = index.needs_refresh() if has else False
-                index_info["db_size_bytes"] = db_path.stat().st_size
-            except Exception:
-                index_info["error"] = "failed to read index"
-        else:
-            index_info["built"] = False
-
-    return {
-        "context_path": str(context_path),
-        "profile": manager.config.profiles.active_profile,
-        "mount_counts": mount_counts,
-        "total_files": total_files,
-        "mount_health": mount_health,
-        "actions": mount_health["suggested_actions"],
-        "index": index_info,
-    }
+    return collect_context_status(manager, context_path)
 
 
 def _tool_context_repair(arguments: dict[str, Any], manager: AFSManager) -> dict[str, Any]:
@@ -1226,7 +1200,7 @@ def _builtin_tool_definitions() -> list[MCPToolDefinition]:
     return [
         MCPToolDefinition(
             name="fs.read",
-            description="Read UTF-8 text from a context-scoped file.",
+            description="Read UTF-8 text from a context-scoped file. Prefer this after `afs.session.bootstrap` or `context.status` so reads stay anchored in the active context.",
             input_schema={
                 "type": "object",
                 "properties": {
@@ -1239,7 +1213,7 @@ def _builtin_tool_definitions() -> list[MCPToolDefinition]:
         ),
         MCPToolDefinition(
             name="fs.write",
-            description="Write UTF-8 text to a context-scoped file.",
+            description="Write UTF-8 text to a context-scoped file. Prefer scratchpad paths for working notes unless the user explicitly wants durable memory or knowledge updates.",
             input_schema={
                 "type": "object",
                 "properties": {
@@ -1359,7 +1333,7 @@ def _builtin_tool_definitions() -> list[MCPToolDefinition]:
         ),
         MCPToolDefinition(
             name="context.index.rebuild",
-            description="Rebuild SQLite context index for structured queries.",
+            description="Rebuild the SQLite context index. Use this when bootstrap/status reports the index is missing or stale.",
             input_schema={
                 "type": "object",
                 "properties": {
@@ -1384,7 +1358,7 @@ def _builtin_tool_definitions() -> list[MCPToolDefinition]:
         ),
         MCPToolDefinition(
             name="context.query",
-            description="Query the SQLite context index by path/content filters.",
+            description="Search the SQLite context index by path/content. Use this before asking the user for context that may already be in memory, knowledge, or scratchpad.",
             input_schema={
                 "type": "object",
                 "properties": {
@@ -1415,7 +1389,7 @@ def _builtin_tool_definitions() -> list[MCPToolDefinition]:
         ),
         MCPToolDefinition(
             name="context.diff",
-            description="Show new, modified, and deleted files since last index build.",
+            description="Show new, modified, and deleted files since the last index build. Call this before editing to understand drift since the previous session.",
             input_schema={
                 "type": "object",
                 "properties": {
@@ -1431,7 +1405,7 @@ def _builtin_tool_definitions() -> list[MCPToolDefinition]:
         ),
         MCPToolDefinition(
             name="context.status",
-            description="Summary of context health: mount counts, index stats, active profile.",
+            description="Summary of context health: mount counts, index stats, active profile. Call this first in a new session if `afs.session.bootstrap` is not available.",
             input_schema={
                 "type": "object",
                 "properties": {
@@ -2343,6 +2317,12 @@ def _list_resources(
     for ctx in _discover_allowed_contexts(manager):
         ctx_uri = f"afs://context/{ctx.path}"
         resources.append({
+            "uri": f"{ctx_uri}/bootstrap",
+            "name": f"{ctx.project_name} bootstrap",
+            "description": f"Session bootstrap packet for {ctx.project_name}",
+            "mimeType": "application/json",
+        })
+        resources.append({
             "uri": f"{ctx_uri}/metadata",
             "name": f"{ctx.project_name} metadata",
             "description": f"Project metadata for {ctx.project_name}",
@@ -2400,6 +2380,12 @@ def _read_resource(
         text = metadata_file.read_text(encoding="utf-8", errors="replace")
         return {"uri": uri, "mimeType": "application/json", "text": text}
 
+    if remainder.endswith("/bootstrap"):
+        context_path_str = remainder[: -len("/bootstrap")]
+        context_path = _resolve_explicit_allowed_context_path(context_path_str, manager)
+        payload = build_session_bootstrap(manager, context_path)
+        return {"uri": uri, "mimeType": "application/json", "text": json.dumps(payload)}
+
     if remainder.endswith("/mounts"):
         context_path_str = remainder[: -len("/mounts")]
         context_path = _resolve_explicit_allowed_context_path(context_path_str, manager)
@@ -2432,6 +2418,27 @@ def _read_resource(
 def _list_prompts(registry: MCPToolRegistry | None = None) -> list[dict[str, Any]]:
     """Return MCP prompt descriptors."""
     prompts = [
+        {
+            "name": "afs.session.bootstrap",
+            "description": "Build a session-start bootstrap packet with health, scratchpad, tasks, hivemind, and durable memory. Call this first in a new session.",
+            "arguments": [
+                {
+                    "name": "context_path",
+                    "description": "Path to .context root (uses configured default if omitted)",
+                    "required": False,
+                },
+                {
+                    "name": "task_limit",
+                    "description": "Maximum queued tasks to include (default 10)",
+                    "required": False,
+                },
+                {
+                    "name": "message_limit",
+                    "description": "Maximum hivemind messages to include (default 10)",
+                    "required": False,
+                },
+            ],
+        },
         {
             "name": "afs.context.overview",
             "description": "Describe the AFS context structure and available mounts",
@@ -2498,6 +2505,17 @@ def _get_prompt(
     registry: MCPToolRegistry | None = None,
 ) -> list[dict[str, Any]]:
     """Build MCP prompt messages for a named prompt."""
+    if name == "afs.session.bootstrap":
+        context_path = _resolve_prompt_context_path(arguments, manager)
+        payload = build_session_bootstrap(
+            manager,
+            context_path,
+            task_limit=_coerce_int(arguments.get("task_limit"), default=10, minimum=1, maximum=100),
+            message_limit=_coerce_int(arguments.get("message_limit"), default=10, minimum=1, maximum=100),
+        )
+        text = render_session_bootstrap(payload)
+        return [{"role": "user", "content": {"type": "text", "text": text}}]
+
     if name == "afs.context.overview":
         context_path = _resolve_prompt_context_path(arguments, manager)
         ctx_root = manager.list_context(context_path=context_path)

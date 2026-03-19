@@ -14,6 +14,7 @@ from ..schema import AFSConfig, GeneralConfig
 _TOP_LEVEL_ORDER = [
     "fs",
     "context",
+    "session",
     "workspace",
     "graph",
     "status",
@@ -39,6 +40,7 @@ _TOP_LEVEL_ORDER = [
 _TOP_LEVEL_COLORS = {
     "fs": "1;32",
     "context": "1;32",
+    "session": "1;32",
     "workspace": "1;32",
     "graph": "1;32",
     "status": "1;34",
@@ -159,6 +161,7 @@ def render_default_help(parser: argparse.ArgumentParser, config: AFSConfig | Non
         _format_list(
             [
                 _cmd("afs status"),
+                _cmd("afs session bootstrap"),
                 _cmd(
                     f"afs init --context-root {_format_path(context_root)} --workspace-name {workspace_label}"
                 ),
@@ -195,6 +198,7 @@ def render_default_help(parser: argparse.ArgumentParser, config: AFSConfig | Non
             [
                 f"{_cmd('afs help <command>')}            # or: {_cmd('afs <command> --help')}",
                 f"{_cmd('afs context discover --json')}   # agent-friendly output",
+                _cmd("afs session bootstrap --json"),
                 _cmd("afs status --json"),
             ]
         )
@@ -206,8 +210,9 @@ def render_default_help(parser: argparse.ArgumentParser, config: AFSConfig | Non
         _format_list(
             [
                 f"{_cmd('source scripts/afs-shell-init.sh')}  # aliases, completions, helpers",
-                f"{_dim('a=afs  as=status  ap=agents-ps  tl=tasks  hm=hivemind  sk=skills')}",
+                f"{_dim('a=afs  as=status  ab=session-bootstrap  ap=agents-ps  tl=tasks  hm=hivemind  sk=skills')}",
                 f"{_dim('afs-here  afs-bootstrap  afs-find  afs-watch  afs-spawn  afs-task  afs-say')}",
+                f"{_dim('afs-gemini  afs-claude  afs-codex  # client launchers with AFS bootstrap')}",
                 f"{_dim('afs-check  # lint + tests helper')}",
             ]
         )
