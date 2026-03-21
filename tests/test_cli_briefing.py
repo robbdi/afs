@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from afs.agent_registry import AgentRegistry
@@ -14,12 +15,13 @@ def test_briefing_reads_agents_from_registry(tmp_path: Path, monkeypatch) -> Non
     monkeypatch.setattr(briefing, "_fetch_halext_tasks", lambda: [])
     monkeypatch.setattr(briefing, "_latest_weekly_carryover", lambda: [])
 
+    now = datetime.now()
     emit_result(
         AgentResult(
             name="context-audit",
             status="ok",
-            started_at="2026-03-19T08:00:00",
-            finished_at="2026-03-19T08:00:05",
+            started_at=(now - timedelta(seconds=5)).isoformat(),
+            finished_at=now.isoformat(),
             duration_seconds=5.0,
         ),
         output_path=tmp_path / "audit.json",

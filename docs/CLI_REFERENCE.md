@@ -17,6 +17,7 @@ Also supported once installed into the active environment:
 - `./scripts/afs init --context-root ~/.context --workspace-name src`
 - `./scripts/afs status`
 - `./scripts/afs status --json`
+- `./scripts/afs doctor`
 - `./scripts/afs context init --path ~/src`
 - `./scripts/afs context discover --path ~/src`
 - `./scripts/afs context ensure-all --path ~/src`
@@ -320,6 +321,35 @@ Client launch wrappers:
 
 These wrappers prefer repo-local config, refresh the session bootstrap packet,
 and export the bootstrap artifact paths before launching the client.
+
+## Doctor
+
+```bash
+./scripts/afs doctor                               # diagnose all common issues
+./scripts/afs doctor --fix                          # auto-apply available fixes
+./scripts/afs doctor --json                         # machine-readable output
+```
+
+`afs doctor` runs diagnostic checks across the full AFS stack and reports
+actionable results. Checks include: Python environment, config loading,
+context root integrity, context mount/provenance health, optional dependencies,
+MCP registration, embedding indexes, extension loading, context index freshness,
+configured auto-start service state, and MCP server build.
+
+When `--fix` is passed, the doctor auto-applies fixes for issues that have
+automated remediation (e.g., creating missing context directories, rebuilding
+mount structures, seeding/pruning mount provenance, and rebuilding stale
+indexes). Issues without auto-fix include suggested manual commands.
+
+The CLI also catches common runtime errors (missing dependencies, file not
+found, permission denied) and suggests running `afs doctor` instead of showing
+raw tracebacks.
+
+The MCP server runs startup diagnostics on launch and logs warnings/errors to
+stderr, so Gemini and other MCP clients can surface context/index/runtime
+problems without the server crashing. The startup subset is lighter than the
+full `doctor` run and skips operator-only checks like service registration
+state.
 
 ## Health
 

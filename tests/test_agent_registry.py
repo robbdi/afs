@@ -62,11 +62,12 @@ def test_emit_result_updates_global_agent_registry(tmp_path: Path, monkeypatch) 
     monkeypatch.setenv("HOME", str(tmp_path))
     output_path = tmp_path / "reports" / "context_audit.json"
 
+    now = datetime.now()
     result = AgentResult(
         name="context-audit",
         status="ok",
-        started_at="2026-03-19T08:00:00",
-        finished_at="2026-03-19T08:00:05",
+        started_at=(now - timedelta(seconds=5)).isoformat(),
+        finished_at=now.isoformat(),
         duration_seconds=5.0,
     )
 

@@ -23,6 +23,7 @@ from . import (
     bundle,
     context,
     core,
+    doctor,
     embeddings,
     fs,
     gemini,
@@ -149,6 +150,9 @@ def build_parser() -> argparse.ArgumentParser:
     # Register health commands
     health_cli.register_parsers(subparsers)
 
+    # Register doctor command
+    doctor.register_parsers(subparsers)
+
     # help
     help_parser = subparsers.add_parser("help", help="Show help for commands.")
     help_parser.add_argument(
@@ -249,7 +253,26 @@ def main(argv: Iterable[str] | None = None) -> int:
             parser.print_help()
         return 1
 
-    exit_code = args.func(args)
+    try:
+        exit_code = args.func(args)
+    except ImportError as exc:
+        print(f"afs: missing dependency: {exc}", file=sys.stderr)
+        print("  hint: run `afs doctor` to diagnose", file=sys.stderr)
+        return 1
+    except FileNotFoundError as exc:
+        print(f"afs: file not found: {exc}", file=sys.stderr)
+        print("  hint: run `afs doctor --fix` to repair", file=sys.stderr)
+        return 1
+    except PermissionError as exc:
+        print(f"afs: permission denied: {exc}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        return 130
+    except Exception as exc:
+        print(f"afs: {type(exc).__name__}: {exc}", file=sys.stderr)
+        print("  hint: run `afs doctor` to diagnose", file=sys.stderr)
+        return 1
+
     try:
         log_cli_invocation(argv or sys.argv[1:], exit_code)
     except Exception:

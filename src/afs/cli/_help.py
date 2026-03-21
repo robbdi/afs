@@ -31,6 +31,7 @@ _TOP_LEVEL_ORDER = [
     "skills",
     "bundle",
     "claude",
+    "doctor",
     "health",
     "studio",
     "review",
@@ -57,6 +58,7 @@ _TOP_LEVEL_COLORS = {
     "skills": "1;35",
     "bundle": "1;35",
     "claude": "1;35",
+    "doctor": "1;35",
     "health": "1;35",
     "studio": "1;36",
     "review": "1;36",
@@ -92,7 +94,7 @@ def render_default_help(parser: argparse.ArgumentParser, config: AFSConfig | Non
             [
                 f"{_tag('fs', '32')} context roots, mounts, workspaces, graph",
                 f"{_tag('ops', '34')} init/status/plugins/services/agents/tasks/hivemind",
-                f"{_tag('agent', '35')} embeddings/mcp/profile/skills/bundle/health",
+                f"{_tag('agent', '35')} embeddings/mcp/profile/skills/bundle/doctor/health",
                 f"{_tag('studio', '36')} studio build/install/path/alias",
             ]
         )
@@ -162,6 +164,7 @@ def render_default_help(parser: argparse.ArgumentParser, config: AFSConfig | Non
             [
                 _cmd("afs status"),
                 _cmd("afs session bootstrap"),
+                _cmd("afs doctor"),
                 _cmd(
                     f"afs init --context-root {_format_path(context_root)} --workspace-name {workspace_label}"
                 ),
@@ -199,6 +202,7 @@ def render_default_help(parser: argparse.ArgumentParser, config: AFSConfig | Non
                 f"{_cmd('afs help <command>')}            # or: {_cmd('afs <command> --help')}",
                 f"{_cmd('afs context discover --json')}   # agent-friendly output",
                 _cmd("afs session bootstrap --json"),
+                _cmd("afs doctor --fix"),
                 _cmd("afs status --json"),
             ]
         )

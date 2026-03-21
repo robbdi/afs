@@ -119,10 +119,25 @@ max_content_chars = 12000
     ```bash
     ./scripts/afs init
     ./scripts/afs context init
+    ./scripts/afs doctor
     ```
 
 4.  **Running Agents:**
     Use the CLI tools to manage context, profiles, skills, embeddings, and MCP.
+
+## Operational Baseline
+
+Use these first when bringing up AFS on a new machine or workspace:
+
+```bash
+./scripts/afs session bootstrap --json
+./scripts/afs doctor
+./scripts/afs health
+```
+
+`afs doctor --fix` is the fastest path for repairing missing context roots,
+missing required mount directories, untracked/stale mount provenance, and stale
+context indexes.
 
 ## AFS Studio variants
 

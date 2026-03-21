@@ -17,6 +17,10 @@ It provides filesystem-native primitives for:
 # Initialize context for current project
 ./scripts/afs context init
 
+# Diagnose and repair common setup/runtime issues
+./scripts/afs doctor
+./scripts/afs doctor --fix
+
 # Show active profile and switch if needed
 ./scripts/afs profile current
 ./scripts/afs profile switch work
@@ -44,6 +48,7 @@ It provides filesystem-native primitives for:
 - [VSCode Extension Review](VSCODE_EXTENSION_REVIEW.md)
 - [Memory and Context Layout](MEMORY_SYSTEM.md)
 - [CLI Reference](CLI_REFERENCE.md)
+- [Roadmap](ROADMAP.md)
 - [Emacs Integration](EMACS_INTEGRATION.md)
 
 ## Agent Note

@@ -67,6 +67,7 @@ export AFS_VENV=~/src/lab/afs/.venv
 ~/src/lab/afs/scripts/afs context discover --path ~/src
 ~/src/lab/afs/scripts/afs context ensure-all --path ~/src
 ~/src/lab/afs/scripts/afs session bootstrap --json
+~/src/lab/afs/scripts/afs doctor
 ~/src/lab/afs/scripts/afs profile current
 ~/src/lab/afs/scripts/afs skills list --profile work
 ~/src/lab/afs/scripts/afs health
@@ -77,6 +78,19 @@ Warm context/cache:
 ```bash
 ~/src/lab/afs/scripts/afs-warm
 ```
+
+Operational repair entrypoint:
+
+```bash
+~/src/lab/afs/scripts/afs doctor
+~/src/lab/afs/scripts/afs doctor --fix
+```
+
+`afs doctor` is the operator-facing diagnostic surface. It checks config,
+active context health, mount provenance, index freshness, extension loading,
+MCP registration, and configured auto-start maintenance services. The built-in
+MCP server reuses a lighter startup subset of these checks so clients get
+warnings without paying for the full operator sweep on every launch.
 
 Agent contract:
 

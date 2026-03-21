@@ -2689,7 +2689,9 @@ def _handle_request(
         try:
             payload = active_registry.call(name, arguments, manager)
         except Exception as exc:
-            return _error_response(request_id, -32000, str(exc))
+            print(f"[afs-mcp] tool error: {name}: {exc}", file=sys.stderr)
+            error_msg = _annotate_error(exc)
+            return _error_response(request_id, -32000, error_msg)
 
         return _success_response(request_id, _as_text_result(payload))
 
@@ -2708,7 +2710,8 @@ def _handle_request(
         try:
             content = _read_resource(uri, manager, registry=active_registry)
         except Exception as exc:
-            return _error_response(request_id, -32000, str(exc))
+            print(f"[afs-mcp] resource error: {uri}: {exc}", file=sys.stderr)
+            return _error_response(request_id, -32000, _annotate_error(exc))
         return _success_response(request_id, {"contents": [content]})
 
     if method == "prompts/list":
@@ -2734,12 +2737,29 @@ def _handle_request(
                 registry=active_registry,
             )
         except Exception as exc:
-            return _error_response(request_id, -32000, str(exc))
+            print(f"[afs-mcp] prompt error: {prompt_name}: {exc}", file=sys.stderr)
+            return _error_response(request_id, -32000, _annotate_error(exc))
         return _success_response(request_id, {"messages": messages})
 
     if request_id is not None:
         return _error_response(request_id, -32601, f"Method not found: {method}")
     return None
+
+
+def _annotate_error(exc: Exception) -> str:
+    """Add recovery hints to common exception types."""
+    msg = str(exc)
+    if isinstance(exc, FileNotFoundError):
+        return f"{msg} (hint: run `afs doctor --fix` to repair missing paths)"
+    if isinstance(exc, PermissionError) and "outside allowed roots" in msg:
+        return f"{msg} (hint: check AFS_MCP_ALLOWED_ROOTS or mcp_allowed_roots in config)"
+    if isinstance(exc, ImportError):
+        return f"{msg} (hint: run `afs doctor` to check dependencies)"
+    if isinstance(exc, ValueError) and "mount" in msg.lower():
+        return f"{msg} (hint: run `afs context repair` to fix mount issues)"
+    return msg
+
+
 def _setup_demo_context(manager: AFSManager) -> None:
     """Configure demo-mode profile with bundled agents and MCP tools."""
     from .agents.supervisor import AgentSupervisor
@@ -2775,21 +2795,47 @@ def _setup_demo_context(manager: AFSManager) -> None:
         print(f"[demo] auto-started agent: {agent.name} pid={agent.pid}", file=sys.stderr)
 
 
+def _startup_diagnostics(config_path: Path | None = None) -> None:
+    """Run lightweight diagnostics on server startup, logging to stderr."""
+    try:
+        from .diagnostics import run_startup_checks
+
+        results = run_startup_checks(config_path=config_path)
+        for result in results:
+            if result.status == "error":
+                print(f"[afs-mcp] ERROR: {result.name}: {result.message}", file=sys.stderr)
+            elif result.status == "warn":
+                print(f"[afs-mcp] WARN: {result.name}: {result.message}", file=sys.stderr)
+    except Exception as exc:
+        print(f"[afs-mcp] startup diagnostics failed: {exc}", file=sys.stderr)
+
+
 def serve(config_path: Path | None = None, *, demo: bool = False) -> int:
     config = load_config_model(config_path=config_path, merge_user=True)
     manager = AFSManager(config=config)
     registry = build_mcp_registry(manager)
 
+    _startup_diagnostics(config_path)
+
     if demo:
         _setup_demo_context(manager)
 
     while True:
-        message = _read_message(sys.stdin.buffer)
-        if message is None:
+        try:
+            message = _read_message(sys.stdin.buffer)
+            if message is None:
+                break
+            response = _handle_request(message, manager, registry=registry)
+            if response is not None:
+                _write_message(sys.stdout.buffer, response)
+        except json.JSONDecodeError as exc:
+            print(f"[afs-mcp] malformed message: {exc}", file=sys.stderr)
+            continue
+        except BrokenPipeError:
             break
-        response = _handle_request(message, manager, registry=registry)
-        if response is not None:
-            _write_message(sys.stdout.buffer, response)
+        except Exception as exc:
+            print(f"[afs-mcp] message loop error: {exc}", file=sys.stderr)
+            continue
 
     return 0
 
