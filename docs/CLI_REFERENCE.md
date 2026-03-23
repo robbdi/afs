@@ -336,10 +336,10 @@ Useful Gemini-oriented MCP operations:
 - `context.repair` for provenance seeding, conservative source remapping, and stale index repair
 - `training.antigravity.status` for Antigravity capture/export readiness in editor integrations
 
-Gemini work-root override:
+Workspace-root override:
 
 ```bash
-export AFS_MCP_ALLOWED_ROOTS=/google
+export AFS_MCP_ALLOWED_ROOTS=~/workspaces/company
 ```
 
 Gemini brief agent:
@@ -434,6 +434,8 @@ These wrappers prefer repo-local config, refresh the session bootstrap packet,
 and export the bootstrap artifact paths before launching the client. They also
 export a shared `AFS_SESSION_ID`, so MCP tool calls, embeddings, hivemind
 traffic, and CLI actions can be replayed later with `afs events replay`.
+Set `AFS_GEMINI_MCP_ALLOWED_ROOTS` or `AFS_CLIENT_MCP_ALLOWED_ROOTS` if you want
+wrapper-local path defaults without exporting `AFS_MCP_ALLOWED_ROOTS` globally.
 
 ## Doctor
 

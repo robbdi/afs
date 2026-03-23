@@ -263,7 +263,7 @@ Legacy tool-only registration still works:
 
 ```toml
 [mcp_tools]
-module = "afs_google.mcp_tools"
+module = "workspace_adapter.mcp_tools"
 factory = "register_mcp_tools"
 ```
 
@@ -272,7 +272,7 @@ from one factory:
 
 ```toml
 [mcp_server]
-module = "afs_google.mcp_surface"
+module = "workspace_adapter.mcp_surface"
 factory = "register_mcp_server"
 ```
 
@@ -352,17 +352,17 @@ Recommended Gemini work configuration for Mercurial cloud workspaces:
 
 ```toml
 [general]
-mcp_allowed_roots = ["/google"]
+mcp_allowed_roots = ["~/workspaces/company"]
 
 [[general.workspace_directories]]
-path = "/google"
-description = "Mercurial cloud workspaces"
+path = "~/workspaces/company"
+description = "Managed workspace root"
 ```
 
 Temporary shell override:
 
 ```bash
-export AFS_MCP_ALLOWED_ROOTS=/google
+export AFS_MCP_ALLOWED_ROOTS=~/workspaces/company
 ```
 
 `context.diff` reports added, modified, and deleted files relative to the last
@@ -370,7 +370,8 @@ index build. `context.status` reports mount counts, mount health, provenance
 health, index health, the active profile, and suggested repair actions for the
 target context. `context.repair` seeds missing provenance records, prunes stale
 provenance, remaps missing mount sources conservatively across configured
-workspace roots such as `/google`, and optionally rebuilds the index.
+workspace roots declared in `general.workspace_directories`, and optionally
+rebuilds the index.
 
 Gemini background brief surfaces:
 
@@ -399,6 +400,9 @@ export:
 - `AFS_SESSION_BOOTSTRAP_JSON`
 - `AFS_SESSION_BOOTSTRAP_MARKDOWN`
 - `AFS_ACTIVE_CONTEXT_ROOT`
+
+They never infer workspace roots automatically. If you want wrapper-local path
+defaults, set `AFS_<CLIENT>_MCP_ALLOWED_ROOTS` or `AFS_CLIENT_MCP_ALLOWED_ROOTS`.
 
 `context-warm` now audits discovered contexts for broken symlink mounts,
 duplicate mount targets, missing profile-managed mounts, untracked/stale mount

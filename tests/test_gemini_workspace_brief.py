@@ -28,7 +28,7 @@ def test_gemini_workspace_brief_is_registered() -> None:
 
 
 def test_gemini_workspace_brief_writes_outputs(tmp_path: Path, monkeypatch) -> None:
-    workspace_root = tmp_path / "google"
+    workspace_root = tmp_path / "workspace-root"
     workspace_root.mkdir()
     config = AFSConfig(
         general=GeneralConfig(

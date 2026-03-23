@@ -71,7 +71,7 @@ def test_load_config_model_parses_profiles_extensions_hooks(tmp_path) -> None:
     config_path = tmp_path / "profiles.toml"
     config_path.write_text(
         "[extensions]\n"
-        "enabled_extensions = [\"afs_google\"]\n"
+        "enabled_extensions = [\"workspace_adapter\"]\n"
         f"extension_dirs = [\"{tmp_path / 'extensions'}\"]\n\n"
         "[profiles]\n"
         "active_profile = \"work\"\n"
@@ -80,7 +80,7 @@ def test_load_config_model_parses_profiles_extensions_hooks(tmp_path) -> None:
         "knowledge_mounts = [\"~/Journal/logs\"]\n"
         "skill_roots = [\"~/skills\"]\n"
         "model_registries = [\"~/registry/chat_registry.toml\"]\n"
-        "enabled_extensions = [\"afs_google\"]\n"
+        "enabled_extensions = [\"workspace_adapter\"]\n"
         "policies = [\"no_zelda\"]\n\n"
         "[hooks]\n"
         "before_context_read = [\"scripts/hooks/read.sh\"]\n",
@@ -88,7 +88,7 @@ def test_load_config_model_parses_profiles_extensions_hooks(tmp_path) -> None:
     )
 
     model = load_config_model(config_path=config_path, merge_user=False)
-    assert model.extensions.enabled_extensions == ["afs_google"]
+    assert model.extensions.enabled_extensions == ["workspace_adapter"]
     assert model.profiles.active_profile == "work"
     assert "work" in model.profiles.profiles
     work = model.profiles.profiles["work"]
@@ -122,7 +122,7 @@ def test_load_config_model_parses_context_index_settings(tmp_path) -> None:
 
 def test_load_config_model_parses_mcp_allowed_roots(tmp_path) -> None:
     config_path = tmp_path / "mcp.toml"
-    allowed = tmp_path / "google"
+    allowed = tmp_path / "workspace-root"
     config_path.write_text(
         "[general]\n"
         f"mcp_allowed_roots = [\"{allowed}\"]\n",
@@ -153,7 +153,7 @@ def test_load_config_model_parses_sensitivity_rules(tmp_path) -> None:
 def test_load_config_model_merges_env_mcp_allowed_roots(tmp_path, monkeypatch) -> None:
     config_path = tmp_path / "mcp_env.toml"
     configured = tmp_path / "configured"
-    env_root = tmp_path / "google"
+    env_root = tmp_path / "workspace-root"
     config_path.write_text(
         "[general]\n"
         f"mcp_allowed_roots = [\"{configured}\"]\n",
@@ -225,7 +225,7 @@ def test_write_config_round_trips_extended_sections(tmp_path) -> None:
                 "workspace_directories": [
                     {"path": str(tmp_path / "workspace"), "description": "Lab"}
                 ],
-                "mcp_allowed_roots": [str(tmp_path / "google")],
+                "mcp_allowed_roots": [str(tmp_path / "workspace-root")],
                 "discovery_ignore": ["archive", "vendor"],
             },
             "directories": [

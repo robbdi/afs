@@ -8,7 +8,7 @@ Each extension lives in its own directory and must include `extension.toml`.
 
 ```text
 extensions/
-  afs_google/
+  workspace_adapter/
     extension.toml
     skills/
     knowledge/
@@ -17,20 +17,20 @@ extensions/
 ## Manifest Schema
 
 ```toml
-name = "afs_google"
-description = "Google-internal workspace adapter"
+name = "workspace_adapter"
+description = "Private workspace adapter"
 
 knowledge_mounts = ["knowledge/work"]
 skill_roots = ["skills"]
 model_registries = ["config/chat_registry.toml"]
-cli_modules = ["afs_google.cli"]
+cli_modules = ["workspace_adapter.cli"]
 policies = ["no_zelda"]
 
 [hooks]
 before_context_read = ["scripts/hooks/before_context_read.sh"]
 
 [mcp_tools]
-module = "afs_google.mcp_tools"
+module = "workspace_adapter.mcp_tools"
 factory = "register_mcp_tools"
 ```
 
@@ -41,7 +41,7 @@ factory = "register_mcp_tools"
 ```toml
 [extensions]
 auto_discover = true
-enabled_extensions = ["afs_google"]
+enabled_extensions = ["workspace_adapter"]
 extension_dirs = ["./extensions"]
 ```
 
@@ -66,4 +66,4 @@ Factory contract:
 
 ## Notes
 
-Core `afs` should only ship generic primitives. Domain-specific content (e.g. Zelda, internal work adapters) belongs in extension repos such as `afs-scawful` or `afs_google` and is mounted via manifests.
+Core `afs` should only ship generic primitives. Domain-specific content belongs in separate extension repos and is mounted via manifests.

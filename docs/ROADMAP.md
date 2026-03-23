@@ -36,7 +36,8 @@ AFS now has a usable core operator loop:
 
 5. Stronger sensitivity controls
    Add explicit path-level rules for "never index", "never embed", and "never
-   export", especially for governed work roots such as `/google`.
+   export", especially for governed workspace roots configured in
+   `general.workspace_directories`.
 
 ## Maintenance Rules
 

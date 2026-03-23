@@ -25,7 +25,7 @@ AFS is built on a modular architecture:
 Core `afs` now supports profile-driven context injection via `afs.toml`.
 
 - Use `[profiles]` + `[profiles.<name>]` to control `knowledge_mounts`, `skill_roots`, and `model_registries`.
-- Use `[extensions]` + `extensions/*/extension.toml` to load external adapters (e.g. `afs_google`) without forking core files.
+- Use `[extensions]` + `extensions/*/extension.toml` to load external adapters (for example, a private workspace adapter) without forking core files.
 - Use `[hooks]` (`before_context_read`, `after_context_write`, `before_agent_dispatch`) for grounding policies.
 
 Inspect and apply profiles:

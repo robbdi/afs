@@ -8,43 +8,43 @@ from afs.schema import ExtensionsConfig
 
 def test_discover_and_load_extension_manifest(tmp_path: Path) -> None:
     root = tmp_path / "extensions"
-    ext = root / "afs_google_test"
+    ext = root / "workspace_adapter_test"
     ext.mkdir(parents=True)
     (ext / "skills").mkdir()
     (ext / "knowledge").mkdir()
 
     (ext / "extension.toml").write_text(
-        "name = \"afs_google_test\"\n"
+        "name = \"workspace_adapter_test\"\n"
         "description = \"work adapter\"\n"
         "knowledge_mounts = [\"knowledge\"]\n"
         "skill_roots = [\"skills\"]\n"
         "model_registries = []\n"
-        "agent_modules = [\"afs_google_test.agents\"]\n"
+        "agent_modules = [\"workspace_adapter_test.agents\"]\n"
         "\n"
         "[mcp_tools]\n"
-        "module = \"afs_google_test.mcp\"\n"
+        "module = \"workspace_adapter_test.mcp\"\n"
         "factory = \"register_mcp_tools\"\n"
         "\n"
         "[mcp_server]\n"
-        "module = \"afs_google_test.server\"\n"
+        "module = \"workspace_adapter_test.server\"\n"
         "factory = \"register_mcp_server\"\n",
         encoding="utf-8",
     )
 
-    config = ExtensionsConfig(enabled_extensions=["afs_google_test"], extension_dirs=[root])
+    config = ExtensionsConfig(enabled_extensions=["workspace_adapter_test"], extension_dirs=[root])
     discovered = discover_extension_manifests(config)
-    assert "afs_google_test" in discovered
+    assert "workspace_adapter_test" in discovered
 
     loaded = load_extensions(config)
-    assert "afs_google_test" in loaded
-    manifest = loaded["afs_google_test"]
+    assert "workspace_adapter_test" in loaded
+    manifest = loaded["workspace_adapter_test"]
     assert manifest.description == "work adapter"
     assert (ext / "knowledge").resolve() in manifest.knowledge_mounts
     assert (ext / "skills").resolve() in manifest.skill_roots
-    assert manifest.agent_modules == ["afs_google_test.agents"]
-    assert manifest.mcp_tools_module == "afs_google_test.mcp"
+    assert manifest.agent_modules == ["workspace_adapter_test.agents"]
+    assert manifest.mcp_tools_module == "workspace_adapter_test.mcp"
     assert manifest.mcp_tools_factory == "register_mcp_tools"
-    assert manifest.mcp_server_module == "afs_google_test.server"
+    assert manifest.mcp_server_module == "workspace_adapter_test.server"
     assert manifest.mcp_server_factory == "register_mcp_server"
 
 

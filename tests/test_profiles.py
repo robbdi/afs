@@ -19,7 +19,7 @@ from afs.schema import (
 
 def test_resolve_profile_with_extension(tmp_path: Path) -> None:
     ext_root = tmp_path / "extensions"
-    extension_dir = ext_root / "afs_google_test"
+    extension_dir = ext_root / "workspace_adapter_test"
     extension_dir.mkdir(parents=True)
 
     work_knowledge = extension_dir / "knowledge"
@@ -30,7 +30,7 @@ def test_resolve_profile_with_extension(tmp_path: Path) -> None:
     work_registry.mkdir()
 
     (extension_dir / "extension.toml").write_text(
-        "name = \"afs_google_test\"\n"
+        "name = \"workspace_adapter_test\"\n"
         "knowledge_mounts = [\"knowledge\"]\n"
         "skill_roots = [\"skills\"]\n"
         "model_registries = [\"registry\"]\n"
@@ -47,7 +47,7 @@ def test_resolve_profile_with_extension(tmp_path: Path) -> None:
         auto_apply=True,
         profiles={
             "work": ProfileConfig(
-                enabled_extensions=["afs_google_test"],
+                enabled_extensions=["workspace_adapter_test"],
             )
         },
     )
@@ -55,7 +55,7 @@ def test_resolve_profile_with_extension(tmp_path: Path) -> None:
         general=general,
         profiles=profiles,
         extensions=ExtensionsConfig(
-            enabled_extensions=["afs_google_test"],
+            enabled_extensions=["workspace_adapter_test"],
             extension_dirs=[ext_root],
         ),
     )
@@ -110,11 +110,11 @@ def test_manager_applies_profile_mounts(tmp_path: Path) -> None:
 
 def test_resolve_profile_does_not_auto_load_unrequested_extensions(tmp_path: Path) -> None:
     ext_root = tmp_path / "extensions"
-    extension_dir = ext_root / "afs_google_test"
+    extension_dir = ext_root / "workspace_adapter_test"
     extension_dir.mkdir(parents=True)
     (extension_dir / "knowledge").mkdir()
     (extension_dir / "extension.toml").write_text(
-        "name = \"afs_google_test\"\n"
+        "name = \"workspace_adapter_test\"\n"
         "knowledge_mounts = [\"knowledge\"]\n",
         encoding="utf-8",
     )

@@ -22,25 +22,25 @@ Use SSH host aliases rather than hardcoded IPs.
 - Use mount points (`~/Mounts/...`) to browse remote filesystems.
 - For Windows, prefer `/mnt/d/src` when working in WSL.
 - Keep `.context/` local to each machine.
-- For Gemini CLI workspaces under `/google`, add `/google` to
+- For Gemini CLI workspaces under a managed root, add that root to
   `general.workspace_directories` and `general.mcp_allowed_roots` so MCP path
-  validation matches your real work root.
+  validation matches your real workspace root.
 
 Example:
 
 ```toml
 [general]
-mcp_allowed_roots = ["/google"]
+mcp_allowed_roots = ["~/workspaces/company"]
 
 [[general.workspace_directories]]
-path = "/google"
-description = "Mercurial cloud workspaces"
+path = "~/workspaces/company"
+description = "Managed workspace root"
 ```
 
 Temporary shell override:
 
 ```bash
-export AFS_MCP_ALLOWED_ROOTS=/google
+export AFS_MCP_ALLOWED_ROOTS=~/workspaces/company
 ```
 
 If you want work-machine bundles or extensions to stay repo-local instead of
@@ -49,7 +49,7 @@ inside the workspace or context. AFS now prefers earlier extension roots over
 later defaults, so a work-local install can safely override an older
 `~/.config/afs/extensions/<name>` copy with the same extension name.
 
-When a workspace path under `/google` moves, `afs context repair` and the
+When a workspace path under one of those roots moves, `afs context repair` and the
 background `context-warm` / `context-watch` services will try a conservative
 remap against registered workspace roots before leaving the mount broken. This
 works best when the real workspace roots are listed in
@@ -77,4 +77,4 @@ Recommended pattern:
 
 Template hook:
 
-- `extensions/afs_google/hooks/context-sync-active-workspace.sh`
+- `extensions/workspace_adapter/hooks/context-sync-active-workspace.sh`

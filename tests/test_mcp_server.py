@@ -311,7 +311,7 @@ def test_events_replay_tool_filters_by_session_id(tmp_path: Path) -> None:
 
 
 def test_context_list_allows_configured_workspace_root(tmp_path: Path) -> None:
-    workspace_root = tmp_path / "google"
+    workspace_root = tmp_path / "workspace-root"
     workspace_root.mkdir()
     project_dir = workspace_root / "repo"
     project_dir.mkdir()
@@ -347,7 +347,7 @@ def test_context_list_allows_configured_workspace_root(tmp_path: Path) -> None:
 
 
 def test_context_list_allows_configured_mcp_allowed_root(tmp_path: Path) -> None:
-    allowed_root = tmp_path / "google"
+    allowed_root = tmp_path / "workspace-root"
     allowed_root.mkdir()
     (allowed_root / "WORKSPACE").write_text("configured root", encoding="utf-8")
 
@@ -381,7 +381,7 @@ def test_context_list_allows_configured_mcp_allowed_root(tmp_path: Path) -> None
 
 
 def test_context_list_allows_env_configured_mcp_root(tmp_path: Path, monkeypatch) -> None:
-    allowed_root = tmp_path / "google"
+    allowed_root = tmp_path / "workspace-root"
     allowed_root.mkdir()
     (allowed_root / "WORKSPACE").write_text("env root", encoding="utf-8")
     manager = _make_manager(tmp_path)
@@ -478,7 +478,7 @@ def test_context_init_allows_explicit_allowed_context_root_outside_cwd(tmp_path:
 
 
 def test_context_init_allows_project_under_workspace_root_outside_cwd(tmp_path: Path) -> None:
-    workspace_root = tmp_path / "google"
+    workspace_root = tmp_path / "workspace-root"
     workspace_root.mkdir()
     context_root = tmp_path / "context"
     context_root.mkdir(parents=True)
@@ -744,7 +744,7 @@ def test_context_status_and_diff_tools(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_context_repair_tool_remaps_missing_mount(tmp_path: Path) -> None:
-    workspace_root = tmp_path / "google"
+    workspace_root = tmp_path / "workspace-root"
     workspace_root.mkdir()
     context_root = tmp_path / "context"
     manager = AFSManager(

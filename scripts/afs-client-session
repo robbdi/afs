@@ -56,8 +56,11 @@ if [ "${AFS_PREFER_REPO_CONFIG}" = "1" ]; then
   export AFS_PREFER_USER_CONFIG=0
 fi
 
-if [ "${CLIENT_LABEL}" = "gemini" ] && [ -d "/google" ] && [ -z "${AFS_MCP_ALLOWED_ROOTS:-}" ]; then
-  export AFS_MCP_ALLOWED_ROOTS="/google"
+CLIENT_ENV_PREFIX="$(printf '%s' "${CLIENT_LABEL}" | tr '[:lower:]-' '[:upper:]_')"
+CLIENT_ROOTS_ENV_VAR="AFS_${CLIENT_ENV_PREFIX}_MCP_ALLOWED_ROOTS"
+DEFAULT_CLIENT_ROOTS="${!CLIENT_ROOTS_ENV_VAR:-${AFS_CLIENT_MCP_ALLOWED_ROOTS:-}}"
+if [ -n "${DEFAULT_CLIENT_ROOTS}" ] && [ -z "${AFS_MCP_ALLOWED_ROOTS:-}" ]; then
+  export AFS_MCP_ALLOWED_ROOTS="${DEFAULT_CLIENT_ROOTS}"
 fi
 
 BOOTSTRAP_JSON_PAYLOAD="$("${AFS_CLI}" session bootstrap --json 2>/dev/null || true)"

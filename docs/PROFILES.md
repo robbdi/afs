@@ -7,7 +7,7 @@ Profiles control what context is injected for a given environment.
 ```toml
 [extensions]
 auto_discover = true
-enabled_extensions = ["afs_google"]
+enabled_extensions = ["workspace_adapter"]
 extension_dirs = ["./extensions"]
 
 [profiles]
@@ -26,7 +26,7 @@ inherits = ["default"]
 knowledge_mounts = ["~/Journal/logs"]
 skill_roots = ["~/src/lab/afs-scawful/skills"]
 model_registries = ["~/src/lab/afs-scawful/config/chat_registry.toml"]
-enabled_extensions = ["afs_google"]
+enabled_extensions = ["workspace_adapter"]
 policies = []
 
 [hooks]
@@ -78,6 +78,6 @@ write `monorepo/active_workspace.toml`.
 
 Template hook:
 
-- `extensions/afs_google/hooks/context-sync-active-workspace.sh`
+- `extensions/workspace_adapter/hooks/context-sync-active-workspace.sh`
 
 `./scripts/afs health` reports when the bridge file is stale (older than one hour).

@@ -159,7 +159,7 @@ Paths are scoped to:
 `context.init` is intended for Gemini-style project bootstrap:
 
 - local project init when the target project is under the current working directory
-- init under configured workspace roots such as `/google`
+- init under configured workspace roots
 - explicit `context_root` under an allowed root for centralized/shared contexts
 
 Gemini-friendly prompts/resources are also exposed over MCP:
@@ -207,17 +207,17 @@ Gemini work setup example:
 
 ```toml
 [general]
-mcp_allowed_roots = ["/google"]
+mcp_allowed_roots = ["~/workspaces/company"]
 
 [[general.workspace_directories]]
-path = "/google"
-description = "Mercurial cloud workspaces"
+path = "~/workspaces/company"
+description = "Managed workspace root"
 ```
 
 Session-only override:
 
 ```bash
-export AFS_MCP_ALLOWED_ROOTS=/google
+export AFS_MCP_ALLOWED_ROOTS=~/workspaces/company
 ```
 
 Gemini background agent surfaces:
@@ -378,7 +378,8 @@ Each wrapper:
 - exports a shared `AFS_SESSION_ID`
 - exports the latest bootstrap artifact paths
 - refreshes the session bootstrap snapshot before launching the client
-- biases Gemini toward `/google` when no explicit `AFS_MCP_ALLOWED_ROOTS` is set
+- never infers workspace roots on its own
+- maps `AFS_<CLIENT>_MCP_ALLOWED_ROOTS` or `AFS_CLIENT_MCP_ALLOWED_ROOTS` into `AFS_MCP_ALLOWED_ROOTS` when you set them
 
 Gemini registration helper:
 
