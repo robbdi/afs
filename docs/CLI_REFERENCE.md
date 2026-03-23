@@ -323,6 +323,33 @@ embedding index, and live embedding ping.
 `--project` or `--knowledge-path` is given, it searches across every indexed
 project subtree under the active context knowledge root.
 
+The in-repo Gemini backend also supports configurable explicit cached-content
+reuse for repeated long prompts. Use env vars for machine-wide defaults:
+
+- `AFS_GEMINI_CACHE_MODE=off|try|required`
+- `AFS_GEMINI_CACHE_TTL=3600s`
+- `AFS_GEMINI_CACHE_MIN_CHARS=4000`
+
+Or override per agent via `ModelConfig.extra`, for example:
+
+```python
+ModelConfig(
+    provider=ModelProvider.GEMINI,
+    model_id="gemini-1.5-flash-001",
+    extra={
+        "gemini_cache": {
+            "mode": "try",
+            "ttl": "600s",
+            "min_chars": 2000,
+        }
+    },
+)
+```
+
+`try` is best-effort and falls back to uncached generation if cache creation or
+lookup fails. `required` treats cache failures as fatal. `min_chars` is a local
+AFS heuristic for avoiding explicit cache creation on tiny prefixes.
+
 ## Briefing
 
 ```bash

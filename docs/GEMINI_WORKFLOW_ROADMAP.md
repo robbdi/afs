@@ -122,11 +122,16 @@ underlying abstractions generic enough for Claude, Codex, and future adapters.
    now. Host CLIs keep their own turn loops; AFS carries schemas, tool
    narrowing, operator digests, and retry guidance without introducing
    execution state into core.
+4. Gemini backend caching: the in-repo Gemini backend now has configurable
+   explicit cached-content support with best-effort (`try`) and strict
+   (`required`) modes, plus TTL and prefix-size knobs. This is adapter-facing
+   and does not add new cache-specific contracts to core AFS.
 
 ## Next Steps
 
 1. Extend `operator.digest` beyond the initial `pytest` / `traceback` / `grep`
    / `diffstat` parsers with richer command-family digests where they prove
    useful in practice.
-2. Build the Gemini adapter layer: thinking-level/budget mapping, cache API
-   integration, thought-signature handling, Gemini-specific prompt templates.
+2. Continue the Gemini adapter layer with thinking-level/budget mapping,
+   persistent cache policy once real hit-rate data exists, thought-signature
+   handling, and Gemini-specific prompt templates.

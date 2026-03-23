@@ -10,6 +10,7 @@ Supports:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -171,6 +172,71 @@ class GenerateResult:
     @property
     def has_tool_calls(self) -> bool:
         return len(self.tool_calls) > 0
+
+
+@dataclass(frozen=True)
+class GeminiCacheSettings:
+    """Configuration for Gemini explicit cached-content usage."""
+
+    mode: str = "off"
+    ttl: str = "3600s"
+    min_prefix_chars: int = 4000
+
+    @property
+    def enabled(self) -> bool:
+        return self.mode in {"try", "required"}
+
+    @property
+    def strict(self) -> bool:
+        return self.mode == "required"
+
+
+def _model_extra_value(config: ModelConfig, key: str) -> Any:
+    nested = config.extra.get("gemini_cache")
+    if isinstance(nested, dict) and nested.get(key) is not None:
+        return nested.get(key)
+    extra_key = f"gemini_cache_{key}"
+    if config.extra.get(extra_key) is not None:
+        return config.extra.get(extra_key)
+    return None
+
+
+def _coerce_int_setting(value: Any, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(0, parsed)
+
+
+def resolve_gemini_cache_settings(config: ModelConfig) -> GeminiCacheSettings:
+    """Resolve Gemini cache settings from ModelConfig.extra and env vars."""
+    raw_mode = str(
+        _model_extra_value(config, "mode")
+        or os.getenv("AFS_GEMINI_CACHE_MODE", "off")
+    ).strip().lower()
+    if raw_mode not in {"off", "try", "required"}:
+        raw_mode = "off"
+
+    raw_ttl = (
+        _model_extra_value(config, "ttl")
+        or os.getenv("AFS_GEMINI_CACHE_TTL")
+        or "3600s"
+    )
+    ttl = str(raw_ttl).strip() or "3600s"
+
+    raw_min_prefix_chars = (
+        _model_extra_value(config, "min_chars")
+        or os.getenv("AFS_GEMINI_CACHE_MIN_CHARS")
+        or 4000
+    )
+    min_prefix_chars = _coerce_int_setting(raw_min_prefix_chars, 4000)
+
+    return GeminiCacheSettings(
+        mode=raw_mode,
+        ttl=ttl,
+        min_prefix_chars=min_prefix_chars,
+    )
 
 
 class ModelBackend(ABC):
@@ -605,6 +671,8 @@ class GeminiBackend(ModelBackend):
     def __init__(self, config: ModelConfig):
         super().__init__(config)
         self._client = None
+        self._cache_settings = resolve_gemini_cache_settings(config)
+        self._cached_content_names: dict[str, str] = {}
 
     def _ensure_client(self):
         """Lazily initialize the Gemini client."""
@@ -628,57 +696,44 @@ class GeminiBackend(ModelBackend):
         self._ensure_client()
 
         # Convert messages to Gemini format
-        contents = []
-        for msg in messages:
-            role = msg["role"]
-            content = msg.get("content", "")
-
-            # Map roles
-            if role == "user":
-                contents.append(types.Content(role="user", parts=[types.Part(text=content)]))
-            elif role == "assistant":
-                contents.append(types.Content(role="model", parts=[types.Part(text=content)]))
-            elif role == "tool":
-                # Tool results need special handling
-                results = msg.get("results", [])
-                parts = []
-                for result in results:
-                    parts.append(
-                        types.Part(
-                            function_response=types.FunctionResponse(
-                                name=result.get("name", "unknown"),
-                                response={"result": result.get("content", "")},
-                            )
-                        )
-                    )
-                if parts:
-                    contents.append(types.Content(role="user", parts=parts))
-            # Skip system messages - handled via system_instruction
+        contents = self._messages_to_gemini_contents(messages, types)
 
         # Convert tools to Gemini format
         gemini_tools = None
         if tools:
             gemini_tools = [self._convert_tool_to_gemini(t) for t in tools if t.get("type") == "function"]
 
-        # Build config
-        gen_config = types.GenerateContentConfig(
-            temperature=self.config.temperature,
-            top_p=self.config.top_p,
-            max_output_tokens=self.config.max_tokens,
+        cached_content_name, cache_key, request_contents = self._prepare_cached_request(
+            messages=messages,
+            contents=contents,
+            types_module=types,
+        )
+        gen_config = self._build_generate_config(
+            types,
+            gemini_tools,
+            cached_content_name=cached_content_name,
         )
 
-        if self.config.system_prompt:
-            gen_config.system_instruction = self.config.system_prompt
-
-        if gemini_tools:
-            gen_config.tools = [types.Tool(function_declarations=gemini_tools)]
-
         try:
-            response = self._client.models.generate_content(
-                model=self.config.model_id,
-                contents=contents,
-                config=gen_config,
-            )
+            try:
+                response = self._client.models.generate_content(
+                    model=self.config.model_id,
+                    contents=request_contents,
+                    config=gen_config,
+                )
+            except Exception as exc:
+                if not (cached_content_name and self._looks_like_cache_error(exc)):
+                    raise
+                if cache_key:
+                    self._cached_content_names.pop(cache_key, None)
+                if self._cache_settings.strict:
+                    raise RuntimeError(f"Gemini cache required but failed: {exc}") from exc
+                logger.warning("Gemini cached content failed, retrying uncached: %s", exc)
+                response = self._client.models.generate_content(
+                    model=self.config.model_id,
+                    contents=contents,
+                    config=self._build_generate_config(types, gemini_tools),
+                )
 
             # Parse response
             content = ""
@@ -704,6 +759,12 @@ class GeminiBackend(ModelBackend):
                 usage={
                     "prompt_tokens": getattr(response.usage_metadata, "prompt_token_count", 0),
                     "completion_tokens": getattr(response.usage_metadata, "candidates_token_count", 0),
+                    "cached_content_tokens": getattr(
+                        response.usage_metadata,
+                        "cached_content_token_count",
+                        0,
+                    ),
+                    "total_tokens": getattr(response.usage_metadata, "total_token_count", 0),
                 },
                 raw_response=response,
             )
@@ -711,6 +772,130 @@ class GeminiBackend(ModelBackend):
         except Exception as e:
             logger.error(f"Gemini generation failed: {e}")
             raise
+
+    def _messages_to_gemini_contents(self, messages: list[dict[str, Any]], types_module) -> list[Any]:
+        contents: list[Any] = []
+        for msg in messages:
+            role = msg["role"]
+            content = msg.get("content", "")
+
+            if role == "user":
+                contents.append(
+                    types_module.Content(role="user", parts=[types_module.Part(text=content)])
+                )
+            elif role == "assistant":
+                contents.append(
+                    types_module.Content(role="model", parts=[types_module.Part(text=content)])
+                )
+            elif role == "tool":
+                results = msg.get("results", [])
+                parts = []
+                for result in results:
+                    parts.append(
+                        types_module.Part(
+                            function_response=types_module.FunctionResponse(
+                                name=result.get("name", "unknown"),
+                                response={"result": result.get("content", "")},
+                            )
+                        )
+                    )
+                if parts:
+                    contents.append(types_module.Content(role="user", parts=parts))
+        return contents
+
+    def _build_generate_config(
+        self,
+        types_module,
+        gemini_tools: list[dict[str, Any]] | None,
+        *,
+        cached_content_name: str | None = None,
+    ):
+        gen_config = types_module.GenerateContentConfig(
+            temperature=self.config.temperature,
+            top_p=self.config.top_p,
+            max_output_tokens=self.config.max_tokens,
+        )
+        if cached_content_name:
+            gen_config.cached_content = cached_content_name
+        elif self.config.system_prompt:
+            gen_config.system_instruction = self.config.system_prompt
+
+        if gemini_tools:
+            gen_config.tools = [types_module.Tool(function_declarations=gemini_tools)]
+        return gen_config
+
+    def _prepare_cached_request(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        contents: list[Any],
+        types_module,
+    ) -> tuple[str | None, str | None, list[Any]]:
+        if not self._cache_settings.enabled:
+            return None, None, contents
+        if len(contents) < 2:
+            return None, None, contents
+
+        prefix_messages = [msg for msg in messages if msg.get("role") != "system"][:-1]
+        cache_fingerprint = json.dumps(
+            {
+                "model": self.config.model_id,
+                "system_prompt": self.config.system_prompt,
+                "messages": prefix_messages,
+            },
+            sort_keys=True,
+            ensure_ascii=True,
+            default=str,
+        )
+        if len(cache_fingerprint) < self._cache_settings.min_prefix_chars:
+            return None, None, contents
+
+        cache_key = hashlib.sha256(cache_fingerprint.encode("utf-8")).hexdigest()
+        cache_name = self._cached_content_names.get(cache_key)
+        if cache_name is None:
+            cache_name = self._create_cached_content(
+                types_module=types_module,
+                prefix_contents=contents[:-1],
+                cache_key=cache_key,
+            )
+        if cache_name is None:
+            return None, None, contents
+        return cache_name, cache_key, contents[-1:]
+
+    def _create_cached_content(
+        self,
+        *,
+        types_module,
+        prefix_contents: list[Any],
+        cache_key: str,
+    ) -> str | None:
+        try:
+            cache = self._client.caches.create(
+                model=self.config.model_id,
+                config=types_module.CreateCachedContentConfig(
+                    contents=prefix_contents,
+                    system_instruction=self.config.system_prompt or None,
+                    ttl=self._cache_settings.ttl,
+                    display_name=f"afs-{cache_key[:12]}",
+                ),
+            )
+        except Exception as exc:
+            if self._cache_settings.strict:
+                raise RuntimeError(f"Gemini cache required but creation failed: {exc}") from exc
+            logger.warning("Gemini cached content creation failed, continuing uncached: %s", exc)
+            return None
+
+        cache_name = getattr(cache, "name", None)
+        if not cache_name:
+            if self._cache_settings.strict:
+                raise RuntimeError("Gemini cache required but create returned no cache name")
+            return None
+        self._cached_content_names[cache_key] = cache_name
+        return cache_name
+
+    def _looks_like_cache_error(self, exc: Exception) -> bool:
+        message = str(exc).lower()
+        return "cached" in message or "cache" in message
 
     def _convert_tool_to_gemini(self, tool: dict[str, Any]) -> dict[str, Any]:
         """Convert OpenAI tool format to Gemini FunctionDeclaration."""
