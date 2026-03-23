@@ -12,4 +12,10 @@ from .session_report import (  # noqa: F401
     discover_session_paths,
     render_session_report_markdown,
 )
-
+from .doctor import (  # noqa: F401
+    ClaudeDoctorReport,
+    ClaudeReapSummary,
+    ClaudeSessionHealth,
+    inspect_claude_sessions,
+    reap_claude_sessions,
+)

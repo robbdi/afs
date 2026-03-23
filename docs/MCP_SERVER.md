@@ -59,15 +59,31 @@ Claude-compatible MCP configs use the same `mcpServers` JSON shape. Depending on
 the client build, that is typically either `~/.claude/settings.json` or
 `~/Library/Application Support/Claude/claude_desktop_config.json`.
 
+For Claude Desktop, prefer launching AFS directly from the repo venv instead of
+through the `scripts/afs` shell wrapper. Claude Desktop's MCP transport uses
+newline-delimited JSON on stdio, and the direct Python module entrypoint has
+been the most reliable path in practice.
+
 ```json
 {
   "mcpServers": {
     "afs": {
-      "command": "/Users/scawful/src/lab/afs/scripts/afs",
-      "args": ["mcp", "serve"]
+      "command": "/Users/scawful/src/lab/afs/.venv/bin/python",
+      "args": ["-m", "afs.mcp_server"],
+      "env": {
+        "AFS_ROOT": "/Users/scawful/src/lab/afs",
+        "AFS_VENV": "/Users/scawful/src/lab/afs/.venv",
+        "PYTHONPATH": "/Users/scawful/src/lab/afs/src"
+      }
     }
   }
 }
+```
+
+AFS can write the user-level Claude config automatically:
+
+```bash
+afs claude setup --scope user
 ```
 
 Project-local setup is also available:
@@ -75,6 +91,46 @@ Project-local setup is also available:
 ```bash
 afs claude setup --path /path/to/project
 ```
+
+## Troubleshooting
+
+### Claude Desktop `initialize` timeout
+
+Symptom in `~/Library/Logs/Claude/mcp-server-afs.log`:
+
+- `Message from client: {"method":"initialize"...}`
+- followed about 60 seconds later by
+  `notifications/cancelled ... MCP error -32001: Request timed out`
+
+This usually means the Claude Desktop MCP entry is launching AFS with the wrong
+transport assumptions or via a brittle shell wrapper.
+
+Recommended fixes:
+
+1. Use the direct venv Python entrypoint shown above:
+   `command=/Users/scawful/src/lab/afs/.venv/bin/python`
+   `args=["-m", "afs.mcp_server"]`
+2. Preserve the repo env:
+   `AFS_ROOT=/Users/scawful/src/lab/afs`
+   `AFS_VENV=/Users/scawful/src/lab/afs/.venv`
+   `PYTHONPATH=/Users/scawful/src/lab/afs/src`
+3. Restart Claude Desktop fully with `Cmd+Q`, not just by closing the window.
+4. Re-check `~/Library/Logs/Claude/mcp-server-afs.log`.
+
+Healthy log sequence:
+
+- `Message from client: {"method":"initialize"...}`
+- `Message from server: {"jsonrpc":"2.0","id":0,"result":...}`
+- `notifications/initialized`
+- `tools/list`
+- `prompts/list`
+- `resources/list`
+
+Notes:
+
+- A warning like `context_index is stale` does not block MCP startup by itself.
+- AFS now supports both `Content-Length` framing and newline-delimited JSON on
+  stdio so it can interoperate with Claude Desktop and other MCP clients.
 
 ## Antigravity Custom Config
 
@@ -92,6 +148,16 @@ In Antigravity, open `MCP Servers -> Manage MCP Servers -> View raw config`, the
 ```
 
 ## Tools
+
+Preferred agent-facing file operations:
+
+- `context.read`
+- `context.write`
+- `context.delete`
+- `context.move`
+- `context.list`
+
+Legacy compatibility aliases:
 
 - `fs.read`
 - `fs.write`
@@ -126,8 +192,9 @@ In Antigravity, open `MCP Servers -> Manage MCP Servers -> View raw config`, the
 
 `context.query` uses a SQLite index with FTS ranking when available, and falls
 back to `LIKE` matching if FTS is unavailable on the host SQLite build.
-`fs.write`, `fs.delete`, and `fs.move` attempt incremental index sync so query
-results stay fresh without a full rebuild. With `auto_index=true` (default),
+`context.write`/`fs.write`, `context.delete`/`fs.delete`, and
+`context.move`/`fs.move` attempt incremental index sync so query results stay
+fresh without a full rebuild. With `auto_index=true` (default),
 `context.query` also auto-refreshes when it detects stale path/content metadata
 via mount fingerprints, including external renames that keep file counts stable.
 
@@ -152,10 +219,11 @@ Gemini-facing MCP resources:
 packages health, drift, scratchpad notes, task queue state, recent hivemind
 messages, and the latest durable memory summary into one startup packet.
 
-`session.pack` / `afs.session.pack` is the compact follow-on surface for
+`session.pack` / `afs.session.pack` is the explicit follow-on surface for
 model-specific working context. It builds a token-budgeted pack for Gemini,
-Claude, Codex, or generic clients and respects `never_export` sensitivity rules
-when including indexed content.
+Claude, Codex, or generic clients, respects `never_export` sensitivity rules
+when including indexed content, and reuses the stored pack artifact on repeated
+calls when the bootstrap snapshot and pack inputs have not changed.
 
 Index behavior can be tuned in `afs.toml`:
 
@@ -254,7 +322,6 @@ Path operations are scoped to:
 
 - `~/.context`
 - configured `general.context_root`
-- configured `general.agent_workspaces_dir`
 - configured `general.workspace_directories`
 - configured `general.mcp_allowed_roots`
 - `AFS_MCP_ALLOWED_ROOTS` (path-separated env override)
@@ -355,7 +422,7 @@ includes maintenance report/service state for `context-warm`, `context-watch`,
 
 ```json
 {
-  "name": "fs.read",
+  "name": "context.read",
   "arguments": {
     "path": "~/.context/scratchpad/notes.md"
   }

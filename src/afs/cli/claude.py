@@ -6,6 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
+from ..claude.doctor import inspect_claude_sessions, reap_claude_sessions
 from ..claude.session_report import build_session_report, render_session_report_markdown
 from ..context_fs import ContextFileSystem
 from ..models import MountType
@@ -97,6 +98,7 @@ def claude_session_report_command(args: argparse.Namespace) -> int:
 def claude_setup_command(args: argparse.Namespace) -> int:
     """Configure Claude Code to use AFS MCP server."""
     from ..claude_integration import (
+        default_claude_user_settings_path,
         generate_claude_md,
         generate_claude_settings,
         merge_claude_settings,
@@ -105,16 +107,23 @@ def claude_setup_command(args: argparse.Namespace) -> int:
     config_path = Path(args.config) if getattr(args, "config", None) else None
     manager = load_manager(config_path)
     project_path, context_path, _context_root, _context_dir = resolve_context_paths(args, manager)
+    scope = getattr(args, "scope", "project")
 
     # Generate and merge settings
     afs_settings = generate_claude_settings(
         project_path,
         config=manager.config,
         config_path=config_path,
+        include_project_context=scope == "project",
     )
-    settings_dir = project_path / ".claude"
-    settings_dir.mkdir(parents=True, exist_ok=True)
-    settings_path = settings_dir / "settings.json"
+    settings_path_arg = getattr(args, "settings_path", None)
+    if settings_path_arg:
+        settings_path = Path(settings_path_arg).expanduser().resolve()
+    elif scope == "user":
+        settings_path = default_claude_user_settings_path().resolve()
+    else:
+        settings_path = project_path / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
 
     existing: dict = {}
     if settings_path.exists():
@@ -126,6 +135,9 @@ def claude_setup_command(args: argparse.Namespace) -> int:
     merged = merge_claude_settings(existing, afs_settings)
     settings_path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
     print(f"wrote: {settings_path}")
+
+    if scope != "project":
+        return 0
 
     # Generate CLAUDE.md
     claude_md_path = project_path / "CLAUDE.md"
@@ -150,6 +162,113 @@ def claude_context_command(args: argparse.Namespace) -> int:
 
     summary = build_session_bootstrap(manager, context_path)
     print(render_session_bootstrap(summary))
+    return 0
+
+
+def claude_doctor_command(args: argparse.Namespace) -> int:
+    """Inspect Claude session accumulation, bridge protection, and debug signals."""
+    claude_root = Path(args.claude_root).expanduser().resolve() if args.claude_root else None
+    report = inspect_claude_sessions(
+        claude_root=claude_root,
+        active_hours=args.active_hours,
+        reap_after_hours=args.reap_after_hours,
+        recent_debug_logs=args.recent_debug_logs,
+    )
+
+    if args.json:
+        print(json.dumps(report.to_dict(), indent=2))
+        return 0
+
+    print(f"claude_root: {report.claude_root}")
+    print(f"projects_root: {report.projects_root}")
+    print(f"archive_root: {report.archive_root}")
+    print(f"projects: {report.project_count}")
+    print(f"sessions: {report.session_count}")
+    counts = ", ".join(
+        f"{name}={report.status_counts.get(name, 0)}"
+        for name in ("active", "stale", "zombie", "protected")
+    )
+    print(f"status_counts: {counts}")
+    candidates = sum(1 for session in report.sessions if session.reap_candidate)
+    print(f"reap_candidates: {candidates}")
+
+    if report.bridge_pointers:
+        print("bridge_pointers:")
+        for pointer in report.bridge_pointers[: args.limit]:
+            env = f" env={pointer.environment_id}" if pointer.environment_id else ""
+            session = f" session={pointer.session_id}" if pointer.session_id else ""
+            source = f" source={pointer.source}" if pointer.source else ""
+            print(f"  - {pointer.project_slug}:{session}{env}{source}")
+
+    signals = report.debug_signals
+    print(
+        "recent_debug: "
+        f"logs={signals.logs_scanned} "
+        f"rate_limits={signals.rate_limit_errors} "
+        f"permission_blocks={signals.permission_blocks} "
+        f"timeouts={signals.timeout_errors} "
+        f"missing_tools={signals.missing_tool_errors}"
+    )
+    if signals.mcp_servers:
+        print("mcp_connect_ms:")
+        for server in signals.mcp_servers[: args.limit]:
+            print(
+                f"  - {server.server}: avg={server.average_ms:.1f} max={server.max_ms} count={server.count}"
+            )
+
+    if report.sessions:
+        print("sessions:")
+        for session in report.sessions[: args.limit]:
+            age_text = f"{session.age_hours:.1f}h" if session.age_hours is not None else "n/a"
+            project = session.project_slug or "_orphans"
+            reason_text = ", ".join(session.reasons) if session.reasons else "none"
+            candidate_flag = " reap" if session.reap_candidate else ""
+            print(
+                f"  - {session.status}{candidate_flag} {age_text} {session.session_id} "
+                f"project={project} last={session.last_activity_source or 'n/a'} reasons={reason_text}"
+            )
+    return 0
+
+
+def claude_reap_command(args: argparse.Namespace) -> int:
+    """Archive stale/zombie Claude sessions. Dry-run by default."""
+    claude_root = Path(args.claude_root).expanduser().resolve() if args.claude_root else None
+    archive_root = Path(args.archive_root).expanduser().resolve() if args.archive_root else None
+    summary = reap_claude_sessions(
+        claude_root=claude_root,
+        active_hours=args.active_hours,
+        reap_after_hours=args.reap_after_hours,
+        recent_debug_logs=args.recent_debug_logs,
+        apply=bool(args.apply),
+        archive_root=archive_root,
+        limit=args.limit,
+    )
+
+    if args.json:
+        print(json.dumps(summary.to_dict(), indent=2))
+        return 0
+
+    mode = "apply" if summary.apply else "dry-run"
+    print(f"mode: {mode}")
+    print(f"claude_root: {summary.claude_root}")
+    print(f"archive_root: {summary.archive_root}")
+    print(f"candidate_count: {summary.candidate_count}")
+    print(f"moved_count: {summary.moved_count}")
+    print(f"skipped_count: {summary.skipped_count}")
+    if summary.manifest_path:
+        print(f"manifest_path: {summary.manifest_path}")
+    if summary.sessions:
+        print("sessions:")
+        for session in summary.sessions:
+            age_text = f"{session.age_hours:.1f}h" if session.age_hours is not None else "n/a"
+            project = session.project_slug or "_orphans"
+            reason_text = ", ".join(session.reasons) if session.reasons else "none"
+            print(
+                f"  - {session.status} {age_text} {session.session_id} "
+                f"project={project} reasons={reason_text}"
+            )
+    else:
+        print("sessions: none")
     return 0
 
 
@@ -204,6 +323,16 @@ def register_parsers(subparsers: argparse._SubParsersAction) -> None:
     setup_parser.add_argument("--context-root", help="Context root override.")
     setup_parser.add_argument("--context-dir", help="Context directory name.")
     setup_parser.add_argument(
+        "--scope",
+        choices=("project", "user"),
+        default="project",
+        help="Write project-local settings (default) or user-level ~/.claude/settings.json.",
+    )
+    setup_parser.add_argument(
+        "--settings-path",
+        help="Explicit Claude settings.json target override.",
+    )
+    setup_parser.add_argument(
         "--force", action="store_true", help="Overwrite existing CLAUDE.md."
     )
     setup_parser.set_defaults(func=claude_setup_command)
@@ -217,3 +346,76 @@ def register_parsers(subparsers: argparse._SubParsersAction) -> None:
     context_parser.add_argument("--context-root", help="Context root override.")
     context_parser.add_argument("--context-dir", help="Context directory name.")
     context_parser.set_defaults(func=claude_context_command)
+
+    doctor_parser = claude_sub.add_parser(
+        "doctor",
+        help="Inspect Claude session accumulation, debug signals, and reap candidates.",
+    )
+    doctor_parser.add_argument("--claude-root", help="Claude root (default: ~/.claude).")
+    doctor_parser.add_argument(
+        "--active-hours",
+        type=int,
+        default=6,
+        help="Sessions newer than this are considered active (default: 6).",
+    )
+    doctor_parser.add_argument(
+        "--reap-after-hours",
+        type=int,
+        default=72,
+        help="Only sessions older than this become reap candidates (default: 72).",
+    )
+    doctor_parser.add_argument(
+        "--recent-debug-logs",
+        type=int,
+        default=20,
+        help="How many recent debug logs to scan for MCP/permission signals.",
+    )
+    doctor_parser.add_argument(
+        "--limit",
+        type=int,
+        default=15,
+        help="Maximum bridge pointers, servers, and sessions to print (default: 15).",
+    )
+    doctor_parser.add_argument("--json", action="store_true", help="Output JSON.")
+    doctor_parser.set_defaults(func=claude_doctor_command)
+
+    reap_parser = claude_sub.add_parser(
+        "reap",
+        help="Archive stale/zombie Claude sessions. Dry-run unless --apply is set.",
+    )
+    reap_parser.add_argument("--claude-root", help="Claude root (default: ~/.claude).")
+    reap_parser.add_argument(
+        "--archive-root",
+        help="Explicit archive root override. Defaults under ~/.claude/archive/.",
+    )
+    reap_parser.add_argument(
+        "--active-hours",
+        type=int,
+        default=6,
+        help="Sessions newer than this are considered active (default: 6).",
+    )
+    reap_parser.add_argument(
+        "--reap-after-hours",
+        type=int,
+        default=72,
+        help="Only sessions older than this become reap candidates (default: 72).",
+    )
+    reap_parser.add_argument(
+        "--recent-debug-logs",
+        type=int,
+        default=20,
+        help="How many recent debug logs to scan while building the candidate list.",
+    )
+    reap_parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="Maximum candidate sessions to archive/report (default: 50).",
+    )
+    reap_parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Move candidate sessions into the archive root. Default is dry-run.",
+    )
+    reap_parser.add_argument("--json", action="store_true", help="Output JSON.")
+    reap_parser.set_defaults(func=claude_reap_command)

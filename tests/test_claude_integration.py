@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from afs.claude_integration import (
+    default_claude_user_settings_path,
     generate_claude_md,
     generate_claude_settings,
     generate_hooks_config,
@@ -21,6 +22,18 @@ def test_generate_claude_settings_basic() -> None:
     entry = settings["mcpServers"]["afs"]
     assert entry["command"] == sys.executable
     assert entry["args"] == ["-m", "afs.mcp_server"]
+
+
+def test_generate_claude_settings_includes_runtime_env() -> None:
+    settings = generate_claude_settings(Path("/tmp/test"))
+    entry = settings["mcpServers"]["afs"]
+    env = entry["env"]
+    repo_root = Path(__file__).resolve().parents[1]
+
+    assert env["AFS_ROOT"] == str(repo_root)
+    assert env["PYTHONPATH"] == str(repo_root / "src")
+    if (repo_root / ".venv").exists():
+        assert env["AFS_VENV"] == str(repo_root / ".venv")
 
 
 def test_generate_claude_settings_with_context_root() -> None:
@@ -44,6 +57,30 @@ def test_generate_claude_settings_prefers_project_config(tmp_path: Path) -> None
 
     assert entry["env"]["AFS_CONFIG_PATH"] == str(config_path)
     assert entry["env"]["AFS_PREFER_REPO_CONFIG"] == "1"
+
+
+def test_generate_claude_settings_user_scope_omits_project_context(tmp_path: Path) -> None:
+    project_path = tmp_path / "repo"
+    project_path.mkdir()
+    config_path = project_path / "afs.toml"
+    config_path.write_text("[general]\ncontext_root = \"/tmp/context\"\n", encoding="utf-8")
+
+    class FakeConfig:
+        class general:
+            context_root = Path("/home/user/.context")
+
+    settings = generate_claude_settings(
+        project_path,
+        config=FakeConfig(),
+        config_path=config_path,
+        include_project_context=False,
+    )
+    entry = settings["mcpServers"]["afs"]
+    env = entry["env"]
+
+    assert "AFS_CONFIG_PATH" not in env
+    assert "AFS_PREFER_REPO_CONFIG" not in env
+    assert "AFS_CONTEXT_ROOT" not in env
 
 
 def test_merge_preserves_other_servers() -> None:
@@ -83,6 +120,9 @@ def test_generate_claude_md() -> None:
     assert "my-project" in md
     assert "/home/user/.context" in md
     assert "afs session bootstrap" in md
+    assert "afs claude doctor --json" in md
+    assert "afs claude reap --limit 20 --apply" in md
+    assert "Never reap `protected` sessions" in md
     assert "handoff.create" in md
 
 
@@ -92,6 +132,10 @@ def test_generate_hooks_config() -> None:
     assert "PostToolUse" in hooks["hooks"]
     assert len(hooks["hooks"]["PostToolUse"]) == 1
     assert "-m afs events tail" in hooks["hooks"]["PostToolUse"][0]["command"]
+
+
+def test_default_claude_user_settings_path(tmp_path: Path) -> None:
+    assert default_claude_user_settings_path(home=tmp_path) == tmp_path / ".claude" / "settings.json"
 
 
 def test_mcp_registration_detects_project_claude_settings(tmp_path: Path) -> None:

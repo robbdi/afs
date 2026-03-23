@@ -67,9 +67,11 @@ export AFS_VENV=~/src/lab/afs/.venv
 ~/src/lab/afs/scripts/afs context discover --path ~/src
 ~/src/lab/afs/scripts/afs context ensure-all --path ~/src
 ~/src/lab/afs/scripts/afs session bootstrap --json
-~/src/lab/afs/scripts/afs session pack "current task" --model gemini --json
 ~/src/lab/afs/scripts/afs events tail --json
 ~/src/lab/afs/scripts/afs claude setup --path ~/src/project-a
+~/src/lab/afs/scripts/afs claude setup --scope user
+~/src/lab/afs/scripts/afs claude doctor
+~/src/lab/afs/scripts/afs claude reap --limit 20
 ~/src/lab/afs/scripts/afs doctor
 ~/src/lab/afs/scripts/afs profile current
 ~/src/lab/afs/scripts/afs skills list --profile work
@@ -111,6 +113,16 @@ Run the built-in stdio MCP server:
 
 Built-in tools:
 
+Preferred agent-facing file operations:
+
+- `context.read`
+- `context.write`
+- `context.delete`
+- `context.move`
+- `context.list`
+
+Legacy compatibility aliases:
+
 - `fs.read`
 - `fs.write`
 - `fs.delete`
@@ -139,7 +151,6 @@ Paths are scoped to:
 
 - `~/.context`
 - configured `general.context_root`
-- configured `general.agent_workspaces_dir`
 - configured `general.workspace_directories`
 - configured `general.mcp_allowed_roots`
 - `AFS_MCP_ALLOWED_ROOTS`
@@ -182,6 +193,10 @@ The CLI also refreshes:
 - `.context/scratchpad/afs_agents/session_bootstrap.md`
 - `.context/scratchpad/afs_agents/session_pack_<model>.json`
 - `.context/scratchpad/afs_agents/session_pack_<model>.md`
+
+`session pack` is an explicit follow-on step, not the default startup path.
+When the bootstrap snapshot and pack inputs have not changed, repeated calls
+reuse the stored pack artifact instead of rebuilding all sections.
 
 Extensions can add their own MCP tools, prompts, and resources with
 `[mcp_server]` in `extension.toml`. Legacy tool-only factories under
@@ -323,11 +338,30 @@ Claude JSON config:
 {
   "mcpServers": {
     "afs": {
-      "command": "/Users/scawful/src/lab/afs/scripts/afs",
-      "args": ["mcp", "serve"]
+      "command": "/Users/scawful/src/lab/afs/.venv/bin/python",
+      "args": ["-m", "afs.mcp_server"],
+      "env": {
+        "AFS_ROOT": "/Users/scawful/src/lab/afs",
+        "AFS_VENV": "/Users/scawful/src/lab/afs/.venv",
+        "PYTHONPATH": "/Users/scawful/src/lab/afs/src"
+      }
     }
   }
 }
+```
+
+Or let AFS write the user-level config for you:
+
+```bash
+~/src/lab/afs/scripts/afs claude setup --scope user
+```
+
+Claude session maintenance:
+
+```bash
+~/src/lab/afs/scripts/afs claude doctor --json
+~/src/lab/afs/scripts/afs claude reap --limit 20          # dry-run
+~/src/lab/afs/scripts/afs claude reap --limit 20 --apply  # archive candidates
 ```
 
 Client bootstrap wrappers:
