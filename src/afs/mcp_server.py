@@ -1556,6 +1556,28 @@ def _tool_context_freshness(arguments: dict[str, Any], manager: AFSManager) -> d
     return index.freshness_scores(mount_types=mount_types, decay_hours=decay_hours, threshold=threshold)
 
 
+def _tool_training_antigravity_status(
+    arguments: dict[str, Any],
+    manager: AFSManager,
+) -> dict[str, Any]:
+    from .antigravity_status import antigravity_status
+
+    _ = manager
+    db_path = arguments.get("db_path")
+    state_keys = arguments.get("state_keys")
+    resolved_db = (
+        Path(db_path).expanduser().resolve()
+        if isinstance(db_path, str) and db_path.strip()
+        else None
+    )
+    parsed_state_keys = (
+        [str(item).strip() for item in state_keys if str(item).strip()]
+        if isinstance(state_keys, list)
+        else None
+    )
+    return antigravity_status(db_path=resolved_db, state_keys=parsed_state_keys)
+
+
 def _tool_session_replay(arguments: dict[str, Any], manager: AFSManager) -> dict[str, Any]:
     from .event_log import build_session_timeline
 
@@ -2304,6 +2326,26 @@ def _builtin_tool_definitions() -> list[MCPToolDefinition]:
                 "additionalProperties": False,
             },
             handler=_tool_context_freshness,
+        ),
+        MCPToolDefinition(
+            name="training.antigravity.status",
+            description="Show Antigravity capture database status for editor integrations and export readiness checks.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "db_path": {
+                        "type": "string",
+                        "description": "Optional Antigravity state.vscdb override.",
+                    },
+                    "state_keys": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional Antigravity state key override list.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+            handler=_tool_training_antigravity_status,
         ),
         MCPToolDefinition(
             name="session.replay",

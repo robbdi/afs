@@ -8,6 +8,7 @@ import { createTransport, type BinaryInfo } from "./transport/clientFactory";
 import type { ITransportClient } from "./transport/types";
 import { locateAfsBinary } from "./utils/binaryLocator";
 import { createLogger } from "./utils/logger";
+import { buildTerminalCommand } from "./utils/terminalCommand";
 import { AfsCommandTreeProvider } from "./views/commandTreeProvider";
 import { ContextTreeProvider } from "./views/contextTreeProvider";
 import { AfsDashboardProvider } from "./views/dashboardProvider";
@@ -115,24 +116,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Training action commands (invoke CLI via terminal)
   context.subscriptions.push(
     vscode.commands.registerCommand("afs.training.freshnessGate", () => {
-      const terminal = vscode.window.createTerminal("AFS Training");
+      const terminal = vscode.window.createTerminal({ name: "AFS Training", env: binaryInfo.env });
       terminal.show();
-      terminal.sendText("afs training freshness-gate --warn-only");
+      terminal.sendText(buildTerminalCommand(binaryInfo, ["training", "freshness-gate", "--warn-only"]));
     }),
     vscode.commands.registerCommand("afs.training.extractSessions", () => {
-      const terminal = vscode.window.createTerminal("AFS Training");
+      const terminal = vscode.window.createTerminal({ name: "AFS Training", env: binaryInfo.env });
       terminal.show();
-      terminal.sendText("afs training extract-sessions --json");
+      terminal.sendText(buildTerminalCommand(binaryInfo, ["training", "extract-sessions", "--json"]));
     }),
     vscode.commands.registerCommand("afs.training.generateRouter", () => {
-      const terminal = vscode.window.createTerminal("AFS Training");
+      const terminal = vscode.window.createTerminal({ name: "AFS Training", env: binaryInfo.env });
       terminal.show();
-      terminal.sendText("afs training generate-router-data --json");
+      terminal.sendText(buildTerminalCommand(binaryInfo, ["training", "generate-router-data", "--json"]));
     }),
     vscode.commands.registerCommand("afs.training.exportAntigravity", () => {
-      const terminal = vscode.window.createTerminal("AFS Training");
+      const terminal = vscode.window.createTerminal({ name: "AFS Training", env: binaryInfo.env });
       terminal.show();
-      terminal.sendText("afs training export-antigravity --json");
+      terminal.sendText(buildTerminalCommand(binaryInfo, ["training", "export-antigravity", "--json"]));
     }),
   );
 

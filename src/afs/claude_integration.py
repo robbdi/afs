@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from .mcp_runtime import build_afs_mcp_entry
+
 
 def generate_claude_settings(
     project_path: Path,
@@ -16,23 +18,23 @@ def generate_claude_settings(
 ) -> dict[str, Any]:
     """Build the mcpServers.afs entry for Claude Code settings."""
     resolved_project = project_path.expanduser().resolve()
-    env = _build_claude_runtime_env()
+    config_path_for_env: Path | None = None
+    context_root_for_env: Path | None = None
     if include_project_context:
         resolved_config_path = config_path or _find_project_config(resolved_project)
         if resolved_config_path is not None:
-            env["AFS_CONFIG_PATH"] = str(resolved_config_path)
-            env["AFS_PREFER_REPO_CONFIG"] = "1"
+            config_path_for_env = resolved_config_path
         if config is not None:
             context_root = getattr(getattr(config, "general", None), "context_root", None)
             if context_root:
-                env["AFS_CONTEXT_ROOT"] = str(context_root)
+                context_root_for_env = context_root
 
-    entry: dict[str, Any] = {
-        "command": sys.executable,
-        "args": ["-m", "afs.mcp_server"],
-    }
-    if env:
-        entry["env"] = env
+    entry = build_afs_mcp_entry(
+        "python-module",
+        prefer_repo_config=include_project_context,
+        config_path=config_path_for_env,
+        context_root=context_root_for_env,
+    )
     return {"mcpServers": {"afs": entry}}
 
 
@@ -113,30 +115,4 @@ def _find_project_config(project_path: Path) -> Path | None:
         config_path = candidate / "afs.toml"
         if config_path.exists():
             return config_path
-    return None
-
-
-def _build_claude_runtime_env() -> dict[str, str]:
-    env: dict[str, str] = {}
-    repo_root = _discover_afs_repo_root()
-    if repo_root is None:
-        return env
-
-    env["AFS_ROOT"] = str(repo_root)
-    venv_dir = repo_root / ".venv"
-    if venv_dir.exists():
-        env["AFS_VENV"] = str(venv_dir)
-
-    src_dir = repo_root / "src"
-    if src_dir.exists():
-        env["PYTHONPATH"] = str(src_dir)
-
-    return env
-
-
-def _discover_afs_repo_root() -> Path | None:
-    module_path = Path(__file__).resolve()
-    for candidate in module_path.parents:
-        if (candidate / "scripts" / "afs").exists() and (candidate / "src" / "afs").exists():
-            return candidate
     return None

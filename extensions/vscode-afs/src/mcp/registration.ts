@@ -2,6 +2,11 @@ import { existsSync, readFileSync, writeFileSync, copyFileSync, mkdirSync } from
 import * as path from "path";
 import * as vscode from "vscode";
 import type { BinaryInfo } from "../transport/clientFactory";
+import {
+  buildMcpConfigCandidates,
+  defaultWorkspaceMcpConfigPath,
+  resolveExistingMcpConfigPath,
+} from "./configCandidates";
 
 interface McpServersConfig {
   mcpServers?: Record<string, { command: string; args?: string[] }>;
@@ -16,39 +21,28 @@ export function detectMcpConfigPath(): string | null {
   if (override) return override;
 
   const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
-  if (!home) return null;
-
-  const candidates: string[] = [];
-
-  // Workspace-level configs first
-  for (const folder of vscode.workspace.workspaceFolders ?? []) {
-    candidates.push(path.join(folder.uri.fsPath, ".cursor", "mcp.json"));
-  }
-
-  // User-level configs
-  candidates.push(
-    path.join(home, ".cursor", "mcp.json"),
-    path.join(home, ".config", "cursor", "mcp.json"),
-    path.join(
-      home,
-      "Library",
-      "Application Support",
-      "Claude",
-      "claude_desktop_config.json",
-    ),
+  const workspaceFolders = (vscode.workspace.workspaceFolders ?? []).map(
+    (folder) => folder.uri.fsPath,
   );
-
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) return candidate;
+  if (home) {
+    const antigravityContextRoot = vscode.workspace
+      .getConfiguration("afs")
+      .get<string>("antigravity.contextRoot", "")
+      .trim() || path.join(home, ".gemini", "antigravity");
+    const existing = resolveExistingMcpConfigPath(
+      buildMcpConfigCandidates({
+        home,
+        workspaceFolders,
+        antigravityContextRoot,
+      }),
+      existsSync,
+    );
+    if (existing) {
+      return existing;
+    }
   }
 
-  // Default: workspace .cursor/mcp.json (will be created)
-  const firstFolder = vscode.workspace.workspaceFolders?.[0];
-  if (firstFolder) {
-    return path.join(firstFolder.uri.fsPath, ".cursor", "mcp.json");
-  }
-
-  return null;
+  return defaultWorkspaceMcpConfigPath(workspaceFolders);
 }
 
 function buildServerEntry(

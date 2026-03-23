@@ -69,3 +69,22 @@ def test_discover_mcp_config_paths_includes_project_codex_config(tmp_path: Path)
 
     assert configs["codex"] == [project_codex]
 
+
+def test_discover_mcp_config_paths_includes_project_gemini_config(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    cwd = tmp_path / "repo"
+    home.mkdir()
+    cwd.mkdir()
+
+    project_gemini = cwd / ".gemini" / "settings.json"
+    project_gemini.parent.mkdir(parents=True)
+    project_gemini.write_text(
+        '{"mcpServers":{"afs":{"command":"afs","args":["mcp","serve"]}}}',
+        encoding="utf-8",
+    )
+
+    configs = discover_mcp_config_paths(home=home, cwd=cwd)
+    hits = find_afs_mcp_registrations(home=home, cwd=cwd)
+
+    assert configs["gemini"] == [project_gemini]
+    assert hits["gemini"] == [str(project_gemini)]

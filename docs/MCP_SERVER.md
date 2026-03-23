@@ -22,9 +22,18 @@ Preferred — use the built-in setup command:
 
 ```bash
 afs gemini setup
+afs gemini setup --scope project              # writes ./.gemini/settings.json
+afs gemini setup --python-module              # opt into python -m afs.mcp_server
 ```
 
-This writes the AFS MCP entry into `~/.gemini/settings.json` automatically.
+By default, `afs gemini setup` writes the local `scripts/afs mcp serve` wrapper
+entry and preserves the repo runtime env (`AFS_ROOT`, `AFS_VENV`, `PYTHONPATH`,
+and `AFS_PREFER_REPO_CONFIG=1`) so Gemini uses the same import/config path as
+the rest of the AFS toolchain.
+
+Use `--scope project` when you want Gemini CLI to keep MCP registration inside
+the current repo at `./.gemini/settings.json`. `afs gemini status` detects both
+user-level and project-level Gemini configs.
 
 Manual alternative:
 
@@ -79,6 +88,11 @@ been the most reliable path in practice.
   }
 }
 ```
+
+For the bundled VS Code extension, `AFS: Register MCP Server` now checks the
+existing Antigravity context-root candidates before falling back to
+workspace `.cursor/mcp.json`. If your fork stores the raw config elsewhere, set
+`afs.mcp.configPath` explicitly in editor settings and rerun the command.
 
 AFS can write the user-level Claude config automatically:
 
@@ -189,6 +203,7 @@ Legacy compatibility aliases:
 - `handoff.read`
 - `handoff.list`
 - `embeddings.index`
+- `training.antigravity.status`
 
 `context.query` uses a SQLite index with FTS ranking when available, and falls
 back to `LIKE` matching if FTS is unavailable on the host SQLite build.

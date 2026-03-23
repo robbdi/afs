@@ -1,24 +1,7 @@
 import * as vscode from "vscode";
+import * as path from "path";
 import type { ITransportClient } from "../transport/types";
-
-function parseToolJson(result: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
-  const content = result?.content;
-  if (!Array.isArray(content) || content.length === 0) {
-    return null;
-  }
-  const first = content[0];
-  if (!first || typeof first !== "object") {
-    return null;
-  }
-  const text = Reflect.get(first, "text");
-  if (typeof text !== "string" || !text.trim()) {
-    return null;
-  }
-  const parsed = JSON.parse(text);
-  return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-    ? (parsed as Record<string, unknown>)
-    : null;
-}
+import { extractToolPayload } from "../utils/toolPayload";
 
 export class AfsDashboardProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "afs.dashboard";
@@ -80,7 +63,7 @@ export class AfsDashboardProvider implements vscode.WebviewViewProvider {
     if (connected) {
       try {
         const statusResult = await this.transport.callTool("context.status", {});
-        const parsed = parseToolJson(statusResult);
+        const parsed = extractToolPayload(statusResult);
         if (parsed) {
           contextStatus = parsed;
         }
@@ -90,7 +73,7 @@ export class AfsDashboardProvider implements vscode.WebviewViewProvider {
 
       try {
         const freshResult = await this.transport.callTool("context.freshness", {});
-        const parsed = parseToolJson(freshResult);
+        const parsed = extractToolPayload(freshResult);
         if (parsed) {
           freshnessData = parsed;
         }
@@ -100,7 +83,7 @@ export class AfsDashboardProvider implements vscode.WebviewViewProvider {
 
       try {
         const agResult = await this.transport.callTool("training.antigravity.status", {});
-        const parsed = parseToolJson(agResult);
+        const parsed = extractToolPayload(agResult);
         if (parsed) {
           antigravityStatus = parsed;
         }
@@ -139,13 +122,23 @@ export class AfsDashboardProvider implements vscode.WebviewViewProvider {
 
     let contextHtml = "";
     if (contextStatus) {
-      const project = (contextStatus as any).project ?? "unknown";
-      const mounts = (contextStatus as any).total_mounts ?? 0;
+      const contextPath = typeof contextStatus.context_path === "string"
+        ? contextStatus.context_path
+        : "";
+      const project = contextPath ? path.basename(path.dirname(contextPath)) : "unknown";
+      const mountCounts = contextStatus.mount_counts;
+      const mounts = mountCounts && typeof mountCounts === "object" && !Array.isArray(mountCounts)
+        ? Object.keys(mountCounts as Record<string, unknown>).length
+        : 0;
+      const totalFiles = typeof contextStatus.total_files === "number"
+        ? contextStatus.total_files
+        : 0;
       contextHtml = `
         <div class="section">
           <h3>Context</h3>
           <div class="row"><span class="label">Project</span><span class="value">${this.esc(project)}</span></div>
           <div class="row"><span class="label">Mounts</span><span class="value">${mounts}</span></div>
+          <div class="row"><span class="label">Files</span><span class="value">${totalFiles}</span></div>
         </div>`;
     }
 
@@ -170,12 +163,14 @@ export class AfsDashboardProvider implements vscode.WebviewViewProvider {
 
     let antigravityHtml = "";
     if (antigravityStatus) {
-      const count = (antigravityStatus as any).trajectory_count ?? 0;
+      const count = (antigravityStatus as any).payload_count ?? 0;
+      const dbExists = (antigravityStatus as any).db_exists === true;
       const lastSync = (antigravityStatus as any).last_sync ?? "unknown";
       antigravityHtml = `
         <div class="section">
           <h3>Antigravity</h3>
-          <div class="row"><span class="label">Trajectories</span><span class="value">${count}</span></div>
+          <div class="row"><span class="label">Payloads</span><span class="value">${count}</span></div>
+          <div class="row"><span class="label">Database</span><span class="value">${dbExists ? "Found" : "Missing"}</span></div>
           <div class="row"><span class="label">Last Sync</span><span class="value">${this.esc(String(lastSync))}</span></div>
         </div>`;
     }

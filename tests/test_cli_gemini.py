@@ -24,6 +24,9 @@ def _base_args(**overrides) -> argparse.Namespace:
         "min_score": 0.3,
         "include_content": False,
         "settings_path": None,
+        "scope": "user",
+        "project_path": None,
+        "python_module": False,
         "force": False,
     }
     payload.update(overrides)
@@ -45,7 +48,35 @@ def test_gemini_setup_writes_afs_mcp_entry(
     assert exit_code == 0
     settings_path = tmp_path / ".gemini" / "settings.json"
     payload = json.loads(settings_path.read_text(encoding="utf-8"))
-    assert payload["mcpServers"]["afs"]["args"] == ["-m", "afs.mcp_server"]
+    entry = payload["mcpServers"]["afs"]
+    assert entry["args"] == ["mcp", "serve"]
+    assert entry["command"].endswith("/scripts/afs")
+    assert entry["env"]["AFS_PREFER_REPO_CONFIG"] == "1"
+    assert entry["env"]["AFS_ROOT"].endswith("/src/lab/afs")
+
+
+def test_gemini_setup_supports_project_scope(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    home = tmp_path / "home"
+    project = tmp_path / "repo"
+    home.mkdir()
+    project.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+
+    exit_code = gemini.gemini_setup_command(
+        _base_args(scope="project", project_path=str(project))
+    )
+    capsys.readouterr()
+
+    assert exit_code == 0
+    settings_path = project / ".gemini" / "settings.json"
+    payload = json.loads(settings_path.read_text(encoding="utf-8"))
+    entry = payload["mcpServers"]["afs"]
+    assert entry["cwd"] == str(project)
+    assert entry["env"]["AFS_PREFER_REPO_CONFIG"] == "1"
 
 
 def test_gemini_status_detects_child_indexes_under_context_root(

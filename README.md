@@ -57,8 +57,9 @@ for the `initialize` timeout troubleshooting sequence.
 AFS has first-class Gemini support: embeddings, MCP registration, and context generation.
 
 ```bash
-# One-time setup — registers AFS MCP in ~/.gemini/settings.json
+# One-time setup — user-level Gemini MCP registration
 afs gemini setup
+afs gemini setup --scope project                     # write ./.gemini/settings.json for the current repo
 
 # Check readiness (API key, SDK, MCP, embeddings)
 afs gemini status
@@ -83,6 +84,10 @@ afs briefing --no-gws
 afs gws status
 afs gws agenda
 ```
+
+`afs gemini setup` writes the repo wrapper entry by default, so Gemini CLI uses
+the same `AFS_ROOT`/`PYTHONPATH` assumptions as `./scripts/afs`. Use
+`--python-module` only when you explicitly want `sys.executable -m afs.mcp_server`.
 
 Install the optional Gemini dependency: `pip install -e ".[gemini]"`
 

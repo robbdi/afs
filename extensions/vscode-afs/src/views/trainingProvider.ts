@@ -1,24 +1,6 @@
 import * as vscode from "vscode";
 import type { ITransportClient } from "../transport/types";
-
-function parseToolJson(result: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
-  const content = result?.content;
-  if (!Array.isArray(content) || content.length === 0) {
-    return null;
-  }
-  const first = content[0];
-  if (!first || typeof first !== "object") {
-    return null;
-  }
-  const text = Reflect.get(first, "text");
-  if (typeof text !== "string" || !text.trim()) {
-    return null;
-  }
-  const parsed = JSON.parse(text);
-  return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-    ? (parsed as Record<string, unknown>)
-    : null;
-}
+import { extractToolPayload } from "../utils/toolPayload";
 
 export class AfsTrainingProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "afs.training";
@@ -77,7 +59,7 @@ export class AfsTrainingProvider implements vscode.WebviewViewProvider {
     if (connected) {
       try {
         const capsResult = await this.transport.callTool("agent.capabilities", {});
-        const parsed = parseToolJson(capsResult);
+        const parsed = extractToolPayload(capsResult);
         if (parsed) {
           agentCaps = parsed;
         }
@@ -87,7 +69,7 @@ export class AfsTrainingProvider implements vscode.WebviewViewProvider {
 
       try {
         const memResult = await this.transport.callTool("memory.status", {});
-        const parsed = parseToolJson(memResult);
+        const parsed = extractToolPayload(memResult);
         if (parsed) {
           memoryStatus = parsed;
         }
@@ -125,7 +107,7 @@ export class AfsTrainingProvider implements vscode.WebviewViewProvider {
 
     let memoryHtml = "";
     if (memoryStatus) {
-      const entries = (memoryStatus as any).entry_count ?? 0;
+      const entries = (memoryStatus as any).entries_count ?? 0;
       const stale = (memoryStatus as any).stale ?? false;
       const cls = stale ? "stale" : "fresh";
       memoryHtml = `

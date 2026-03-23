@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sys
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -20,6 +19,7 @@ from ..context_paths import resolve_mount_root
 from ..core import resolve_context_root
 from ..embeddings import SearchResult, create_embed_fn, search_embedding_index
 from ..health.mcp_registration import find_afs_mcp_registrations
+from ..mcp_runtime import build_afs_mcp_entry
 from ..models import MountType
 
 # --------------------------------------------------------------------------- #
@@ -48,13 +48,22 @@ def _default_gemini_settings_path() -> Path:
     return Path.home() / ".gemini" / "settings.json"
 
 
-def _build_afs_mcp_entry() -> dict[str, Any]:
+def _project_gemini_settings_path(project_path: Path) -> Path:
+    """Return the project-local Gemini settings path."""
+    return project_path.expanduser().resolve() / ".gemini" / "settings.json"
+
+
+def _build_afs_mcp_entry(
+    *,
+    cwd: Path | None = None,
+    python_module: bool = False,
+) -> dict[str, Any]:
     """Build the AFS MCP server entry for settings.json."""
-    python = sys.executable
-    return {
-        "command": python,
-        "args": ["-m", "afs.mcp_server"],
-    }
+    return build_afs_mcp_entry(
+        "python-module" if python_module else "wrapper",
+        cwd=cwd,
+        prefer_repo_config=True,
+    )
 
 
 def _read_settings(path: Path) -> dict[str, Any]:
@@ -81,16 +90,30 @@ def _write_settings(path: Path, data: dict[str, Any]) -> None:
 
 def gemini_setup_command(args: argparse.Namespace) -> int:
     """Set up Gemini integration: settings.json + MCP registration."""
-    settings_path = _find_gemini_settings() or _default_gemini_settings_path()
+    project_path = None
+    if args.scope == "project":
+        project_path = (
+            Path(args.project_path).expanduser().resolve()
+            if args.project_path
+            else Path.cwd().resolve()
+        )
+
     if args.settings_path:
         settings_path = Path(args.settings_path).expanduser().resolve()
+    elif project_path is not None:
+        settings_path = _project_gemini_settings_path(project_path)
+    else:
+        settings_path = _find_gemini_settings() or _default_gemini_settings_path()
 
     data = _read_settings(settings_path) if settings_path.exists() else {}
 
     if "mcpServers" not in data:
         data["mcpServers"] = {}
 
-    mcp_entry = _build_afs_mcp_entry()
+    mcp_entry = _build_afs_mcp_entry(
+        cwd=project_path,
+        python_module=bool(args.python_module),
+    )
 
     if "afs" in data["mcpServers"]:
         if args.force:
@@ -430,6 +453,21 @@ def register_parsers(subparsers: argparse._SubParsersAction) -> None:
     setup.add_argument(
         "--settings-path",
         help="Override settings.json path (default: ~/.gemini/settings.json).",
+    )
+    setup.add_argument(
+        "--scope",
+        choices=("user", "project"),
+        default="user",
+        help="Write user-level ~/.gemini/settings.json or project-local ./.gemini/settings.json.",
+    )
+    setup.add_argument(
+        "--project-path",
+        help="Project root for --scope project (default: current directory).",
+    )
+    setup.add_argument(
+        "--python-module",
+        action="store_true",
+        help="Use the current Python interpreter instead of the local scripts/afs wrapper.",
     )
     setup.add_argument(
         "--force",

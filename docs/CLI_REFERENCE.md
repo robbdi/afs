@@ -173,6 +173,7 @@ wrappers.
 ```bash
 ./scripts/afs training freshness-gate --path ~/src/project-a
 ./scripts/afs training freshness-gate --path ~/src/project-a --warn-only --json
+./scripts/afs training antigravity-status --json
 ./scripts/afs training extract-sessions --path ~/src/project-a --output ./session_replay_training.jsonl
 ./scripts/afs training generate-router-data --config ~/src/project-a/afs.toml --output ./router_from_capabilities.jsonl
 ./scripts/training_watch.sh --debounce 45
@@ -180,6 +181,10 @@ wrappers.
 
 `training freshness-gate` checks per-mount context freshness before training and
 returns a blocking or warning-only readiness report.
+
+`training antigravity-status` reports whether the local Antigravity capture DB
+exists, when it last changed, and whether the expected trajectory-summary
+payloads are present before you attempt an export.
 
 `training extract-sessions` prefers explicit `AFS_SESSION_ID`-based replay data
 when present, and falls back to older date-grouped timelines only when the
@@ -260,8 +265,10 @@ indexing, `RETRIEVAL_QUERY` for search queries (asymmetric retrieval). Override 
 ```bash
 # Set up Gemini settings.json with AFS MCP server
 ./scripts/afs gemini setup
+./scripts/afs gemini setup --scope project          # write ./.gemini/settings.json
 ./scripts/afs gemini setup --force                    # overwrite existing entry
 ./scripts/afs gemini setup --settings-path ~/custom/settings.json
+./scripts/afs gemini setup --python-module          # use python -m afs.mcp_server
 
 # Check integration health
 ./scripts/afs gemini status
@@ -280,8 +287,12 @@ indexing, `RETRIEVAL_QUERY` for search queries (asymmetric retrieval). Override 
 ./scripts/afs gemini context --knowledge-path ~/.context/knowledge/afs "hooks"
 ```
 
-`afs gemini setup` writes the AFS MCP server entry into `~/.gemini/settings.json`
-so Gemini CLI can discover AFS tools automatically.
+`afs gemini setup` writes the AFS MCP server entry into Gemini CLI settings so
+Gemini can discover AFS tools automatically. The default launch target is the
+repo-local `scripts/afs mcp serve` wrapper, which preserves AFS runtime env and
+repo-config preference automatically. Use `--scope project` for repo-local
+`./.gemini/settings.json` and `--python-module` only when you explicitly want
+the direct Python module entrypoint.
 
 `afs gemini status` checks: API key, google-genai SDK, settings.json, MCP registration,
 embedding index, and live embedding ping.
@@ -323,6 +334,7 @@ Useful Gemini-oriented MCP operations:
 - `context.diff` for “what changed since the last index build”
 - `context.status` for mount counts, mount health, profile, and index health
 - `context.repair` for provenance seeding, conservative source remapping, and stale index repair
+- `training.antigravity.status` for Antigravity capture/export readiness in editor integrations
 
 Gemini work-root override:
 

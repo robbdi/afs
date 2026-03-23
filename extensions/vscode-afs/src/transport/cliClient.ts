@@ -137,6 +137,51 @@ export class CliClient implements ITransportClient {
           removed: true,
         };
       }
+      case "context.status": {
+        const projectPath = this.projectPathFromContextArg(args.context_path);
+        return this.execJson(["status", "--start-dir", projectPath, "--json"]);
+      }
+      case "context.freshness": {
+        const projectPath = this.projectPathFromContextArg(args.context_path);
+        const cliArgs = ["context", "freshness", "--path", projectPath, "--json"];
+        if (typeof args.mount_type === "string" && args.mount_type.trim()) {
+          cliArgs.push("--mount", args.mount_type.trim());
+        }
+        if (typeof args.decay_hours === "number") {
+          cliArgs.push("--decay-hours", String(args.decay_hours));
+        }
+        if (typeof args.threshold === "number") {
+          cliArgs.push("--threshold", String(args.threshold));
+        }
+        return this.execJson(cliArgs);
+      }
+      case "memory.status": {
+        const projectPath = this.projectPathFromContextArg(args.context_path);
+        return this.execJson(["memory", "status", "--path", projectPath, "--json"]);
+      }
+      case "agent.capabilities": {
+        const cliArgs = ["agents", "capabilities", "--json"];
+        if (typeof args.agent_name === "string" && args.agent_name.trim()) {
+          cliArgs.push("--agent", args.agent_name.trim());
+        }
+        const agents = await this.execJson(cliArgs);
+        return Array.isArray(agents) ? { agents, count: agents.length } : agents;
+      }
+      case "training.antigravity.status": {
+        const cliArgs = ["training", "antigravity-status", "--json"];
+        if (typeof args.db_path === "string" && args.db_path.trim()) {
+          cliArgs.push("--db-path", args.db_path.trim());
+        }
+        const stateKeys = args.state_keys;
+        if (Array.isArray(stateKeys)) {
+          for (const key of stateKeys) {
+            if (typeof key === "string" && key.trim()) {
+              cliArgs.push("--state-key", key.trim());
+            }
+          }
+        }
+        return this.execJson(cliArgs);
+      }
       case "context.read":
       case "fs.read": {
         const filePath = args.path as string;
@@ -247,6 +292,11 @@ export class CliClient implements ITransportClient {
         },
       );
     });
+  }
+
+  private async execJson(extraArgs: string[]): Promise<Record<string, unknown>> {
+    const output = await this.exec(extraArgs);
+    return JSON.parse(output) as Record<string, unknown>;
   }
 
   private parseMountPath(rawPath: string): {

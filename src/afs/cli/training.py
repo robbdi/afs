@@ -318,6 +318,27 @@ def training_antigravity_export_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def training_antigravity_status_command(args: argparse.Namespace) -> int:
+    """Show Antigravity capture status."""
+    from ..antigravity_status import antigravity_status
+
+    db_path = Path(args.db_path).expanduser().resolve() if args.db_path else None
+    state_keys = list(args.state_key or [])
+    status = antigravity_status(db_path=db_path, state_keys=state_keys or None)
+
+    if args.json:
+        print(json.dumps(status, indent=2))
+        return 0
+
+    print(f"db_path: {status['db_path']}")
+    print(f"db_exists: {status['db_exists']}")
+    print(f"payload_count: {status['payload_count']}")
+    print(f"last_sync: {status['last_sync'] or '(none)'}")
+    if status["error"]:
+        print(f"error: {status['error']}")
+    return 0
+
+
 # =============================================================================
 # Gemini Export
 # =============================================================================
@@ -1132,6 +1153,24 @@ def register_parsers(subparsers: argparse._SubParsersAction) -> None:
         help="Disable secret redaction.",
     )
     train_antigravity.set_defaults(func=training_antigravity_export_command)
+
+    train_antigravity_status = training_sub.add_parser(
+        "antigravity-status",
+        help="Show Antigravity capture status.",
+    )
+    train_antigravity_status.add_argument("--config", help="Config path.")
+    train_antigravity_status.add_argument(
+        "--db-path", help="Antigravity state.vscdb path."
+    )
+    train_antigravity_status.add_argument(
+        "--state-key",
+        action="append",
+        help="State key to read from the DB (repeatable).",
+    )
+    train_antigravity_status.add_argument(
+        "--json", action="store_true", help="Output JSON."
+    )
+    train_antigravity_status.set_defaults(func=training_antigravity_status_command)
 
     # training gemini-export
     train_gemini = training_sub.add_parser(

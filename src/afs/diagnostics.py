@@ -305,7 +305,7 @@ def check_mcp_registration() -> DiagnosticResult:
             name="mcp_registration",
             status="warn",
             message="AFS MCP not registered in any client",
-            fix_description="Run: afs gemini setup  (or afs mcp register)",
+            fix_description="Run: afs gemini setup  (or afs gemini setup --scope project)",
         )
 
     return DiagnosticResult(

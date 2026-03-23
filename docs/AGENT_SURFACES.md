@@ -380,6 +380,17 @@ Each wrapper:
 - refreshes the session bootstrap snapshot before launching the client
 - biases Gemini toward `/google` when no explicit `AFS_MCP_ALLOWED_ROOTS` is set
 
+Gemini registration helper:
+
+```bash
+~/src/lab/afs/scripts/afs gemini setup
+~/src/lab/afs/scripts/afs gemini setup --scope project
+```
+
+The default Gemini entry uses `scripts/afs mcp serve` with repo runtime env so
+the MCP server resolves local source checkouts reliably. Use `--python-module`
+only when you explicitly want `python -m afs.mcp_server`.
+
 Antigravity raw config example:
 
 ```json
@@ -395,6 +406,10 @@ Antigravity raw config example:
 
 If the client requires a Python module entrypoint instead, use a Python
 environment where `afs` is installed and run `python3 -m afs.mcp_server`.
+
+For the VS Code extension, `AFS: Register MCP Server` checks the configured
+Antigravity context-root candidates first. Set `afs.mcp.configPath` when your
+fork stores the raw MCP config in a nonstandard location.
 
 `afs health` checks Gemini, Claude, and Codex registration files, recognizes
 wrapper-style `afs mcp serve` processes, and surfaces context mount drift such

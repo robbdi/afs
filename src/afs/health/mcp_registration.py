@@ -43,6 +43,13 @@ def discover_mcp_config_paths(
     configs: dict[str, list[Path]] = {client: [] for client in SUPPORTED_MCP_CLIENTS}
     for client, candidates in _JSON_CONFIG_CANDIDATES.items():
         paths = [home_dir / candidate for candidate in candidates]
+        if client == "gemini":
+            for project_candidate in (
+                cwd_dir / ".gemini" / "settings.json",
+                cwd_dir / ".gemini" / "mcp.json",
+            ):
+                if project_candidate not in paths:
+                    paths.append(project_candidate)
         # Also check project-level .claude/settings.json
         if client == "claude":
             project_candidate = cwd_dir / ".claude" / "settings.json"
@@ -148,4 +155,3 @@ def _server_looks_like_afs(name: Any, config: Any) -> bool:
             and normalized_args[3] == "serve"
         )
     return False
-
