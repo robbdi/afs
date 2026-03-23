@@ -42,7 +42,6 @@ def _build_context(
     config = AFSConfig(
         general=GeneralConfig(
             context_root=context_root,
-            agent_workspaces_dir=context_root / "workspaces",
         ),
         directories=directories or default_directory_configs(),
     )

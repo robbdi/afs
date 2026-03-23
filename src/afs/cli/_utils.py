@@ -25,7 +25,6 @@ AFS_DIRS = [
     "hivemind",
     "global",
     "items",
-    "monorepo",
 ]
 
 
@@ -197,7 +196,6 @@ def ensure_context_root(root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
     for name in AFS_DIRS:
         (root / name).mkdir(parents=True, exist_ok=True)
-    (root / "workspaces").mkdir(parents=True, exist_ok=True)
 
 
 def write_config(path: Path, config: AFSConfig) -> None:
@@ -247,7 +245,6 @@ def write_config(path: Path, config: AFSConfig) -> None:
     general = config.general
     gen_table = _table()
     gen_table["context_root"] = str(general.context_root)
-    gen_table["agent_workspaces_dir"] = str(general.agent_workspaces_dir)
     if general.python_executable:
         gen_table["python_executable"] = str(general.python_executable)
     gen_table["discovery_ignore"] = list(general.discovery_ignore)
@@ -458,7 +455,6 @@ def build_config(
 
     general = GeneralConfig()
     general.context_root = context_root
-    general.agent_workspaces_dir = context_root / "workspaces"
     if workspace_path:
         general.workspace_directories = [
             WorkspaceDirectory(path=workspace_path, description=workspace_name)

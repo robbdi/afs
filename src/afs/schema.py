@@ -94,11 +94,6 @@ def default_directory_configs() -> list[DirectoryConfig]:
             policy=PolicyType.WRITABLE,
             role=MountType.ITEMS,
         ),
-        DirectoryConfig(
-            name="monorepo",
-            policy=PolicyType.READ_ONLY,
-            role=MountType.MONOREPO,
-        ),
     ]
 
 
@@ -117,9 +112,6 @@ class WorkspaceDirectory:
 @dataclass
 class GeneralConfig:
     context_root: Path = field(default_factory=lambda: Path.home() / ".context")
-    agent_workspaces_dir: Path = field(
-        default_factory=lambda: Path.home() / ".context" / "workspaces"
-    )
     python_executable: Path | None = None
     workspace_directories: list[WorkspaceDirectory] = field(default_factory=list)
     mcp_allowed_roots: list[Path] = field(default_factory=list)
@@ -128,7 +120,6 @@ class GeneralConfig:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> GeneralConfig:
         context_root = data.get("context_root")
-        agent_workspaces_dir = data.get("agent_workspaces_dir")
         python_executable = data.get("python_executable")
         workspace_directories = []
         for item in data.get("workspace_directories", []):
@@ -150,9 +141,6 @@ class GeneralConfig:
             context_root=_as_path(context_root)
             if context_root
             else cls().context_root,
-            agent_workspaces_dir=_as_path(agent_workspaces_dir)
-            if agent_workspaces_dir
-            else cls().agent_workspaces_dir,
             python_executable=_as_path(python_executable)
             if python_executable
             else None,

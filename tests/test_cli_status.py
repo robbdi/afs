@@ -44,7 +44,6 @@ def _build_context(tmp_path: Path) -> tuple[AFSConfig, Path]:
     config = AFSConfig(
         general=GeneralConfig(
             context_root=context_root,
-            agent_workspaces_dir=context_root / "workspaces",
         )
     )
     manager = AFSManager(config=config)
@@ -140,7 +139,6 @@ def test_agents_watch_command_uses_remapped_history_dir(
     config = AFSConfig(
         general=GeneralConfig(
             context_root=context_root,
-            agent_workspaces_dir=context_root / "workspaces",
         ),
         directories=_remap_directories(history="ledger"),
     )

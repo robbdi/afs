@@ -4,6 +4,10 @@ Provides a Python interface to the `gws` binary for calendar, gmail, drive,
 sheets, and other Google Workspace operations. All methods fail gracefully
 when gws is not installed or not authenticated.
 
+Every operation is routed through :class:`~afs.gws_policy.GWSPolicyEnforcer`
+so that read/notify/mutate/dangerous actions are classified, rate-limited,
+and optionally gated behind human confirmation.
+
 Usage:
     from afs.gws import GWSClient
 
@@ -17,16 +21,122 @@ Usage:
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import subprocess
 from typing import Any
 
+from .gws_policy import (
+    GWSPolicyConfig,
+    GWSPolicyEnforcer,
+    PolicyDecision,
+    RiskTier,
+    classify_action,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class GWSPolicyError(Exception):
+    """Raised when an operation is blocked by GWS policy."""
+
+    def __init__(self, decision: PolicyDecision):
+        self.decision = decision
+        super().__init__(
+            f"GWS policy blocked: {decision.reason} "
+            f"[tier={decision.classification.tier.value}, "
+            f"op={decision.classification.description}]"
+        )
+
+
+class GWSConfirmationRequired(Exception):
+    """Raised when an operation needs human approval before execution."""
+
+    def __init__(self, decision: PolicyDecision):
+        self.decision = decision
+        super().__init__(
+            f"GWS action requires confirmation: {decision.classification.description} "
+            f"[tier={decision.classification.tier.value}]"
+        )
+
 
 class GWSClient:
-    """Thin wrapper around the `gws` CLI binary."""
+    """Thin wrapper around the ``gws`` CLI binary with policy enforcement.
 
-    def __init__(self, binary: str | None = None):
+    Parameters
+    ----------
+    binary : str | None
+        Path to the ``gws`` binary.  Resolved via ``shutil.which`` when *None*.
+    policy_config : GWSPolicyConfig | None
+        Override the default safety policy.
+    confirm_callback : callable | None
+        Called when an action needs human approval.  Receives a
+        :class:`PolicyDecision` and should return *True* to proceed or
+        *False* to abort.  When *None*, :class:`GWSConfirmationRequired` is
+        raised instead.
+    """
+
+    def __init__(
+        self,
+        binary: str | None = None,
+        policy_config: GWSPolicyConfig | None = None,
+        confirm_callback: Any | None = None,
+    ):
         self._binary = binary or shutil.which("gws")
+        self._policy = GWSPolicyEnforcer(
+            config=policy_config,
+            audit_callback=self._audit_log,
+        )
+        self._confirm_callback = confirm_callback
+
+    # ------------------------------------------------------------------
+    # Policy helpers
+    # ------------------------------------------------------------------
+
+    @property
+    def policy(self) -> GWSPolicyEnforcer:
+        """Access the policy enforcer (e.g. for introspection or testing)."""
+        return self._policy
+
+    def _enforce_policy(self, args: list[str], *, caller: str = "afs") -> PolicyDecision:
+        """Run policy checks and handle confirmation flow.
+
+        Returns the decision if allowed.
+        Raises GWSPolicyError if blocked.
+        Raises GWSConfirmationRequired if human approval needed and no callback.
+        """
+        decision = self._policy.evaluate(args, caller=caller)
+
+        if not decision.allowed:
+            logger.warning("GWS policy blocked: %s — %s", decision.classification.description, decision.reason)
+            raise GWSPolicyError(decision)
+
+        if decision.needs_human_approval:
+            if self._confirm_callback:
+                approved = self._confirm_callback(decision)
+                if not approved:
+                    logger.info("GWS action declined by user: %s", decision.classification.description)
+                    raise GWSPolicyError(PolicyDecision(
+                        allowed=False,
+                        reason="User declined confirmation",
+                        classification=decision.classification,
+                    ))
+                logger.info("GWS action approved by user: %s", decision.classification.description)
+            else:
+                raise GWSConfirmationRequired(decision)
+
+        return decision
+
+    @staticmethod
+    def _audit_log(outcome: str, classification: Any, decision: Any) -> None:
+        logger.info(
+            "GWS audit: %s | tier=%s | service=%s | op=%s | reason=%s",
+            outcome,
+            classification.tier.value,
+            classification.service,
+            classification.description,
+            decision.reason,
+        )
 
     @property
     def available(self) -> bool:
@@ -41,23 +151,41 @@ class GWSClient:
         status = self.auth_status()
         return status.get("auth_method", "none") != "none"
 
-    def _run(self, args: list[str], timeout: int = 15) -> subprocess.CompletedProcess:
-        """Run a gws command and return the raw result."""
+    def _run(
+        self,
+        args: list[str],
+        timeout: int = 15,
+        *,
+        _skip_policy: bool = False,
+    ) -> subprocess.CompletedProcess:
+        """Run a gws command and return the raw result.
+
+        Policy enforcement happens here unless ``_skip_policy`` is set
+        (used internally for auth-status checks that must not recurse).
+        """
         if not self._binary:
             raise RuntimeError("gws binary not found")
+        if not _skip_policy:
+            self._enforce_policy(args)
         return subprocess.run(
             [self._binary] + args,
             capture_output=True, text=True, timeout=timeout,
         )
 
-    def _run_json(self, args: list[str], timeout: int = 15) -> Any:
+    def _run_json(
+        self,
+        args: list[str],
+        timeout: int = 15,
+        *,
+        _skip_policy: bool = False,
+    ) -> Any:
         """Run a gws command and parse JSON output.
 
         Handles both single JSON objects and NDJSON streams.
         Returns None on any failure.
         """
         try:
-            result = self._run(args, timeout=timeout)
+            result = self._run(args, timeout=timeout, _skip_policy=_skip_policy)
             if result.returncode != 0:
                 return None
             output = result.stdout.strip()
@@ -83,8 +211,11 @@ class GWSClient:
     # ------------------------------------------------------------------
 
     def auth_status(self) -> dict[str, Any]:
-        """Return gws auth status as a dict."""
-        data = self._run_json(["auth", "status"])
+        """Return gws auth status as a dict.
+
+        Auth introspection bypasses policy — it is not a Workspace API call.
+        """
+        data = self._run_json(["auth", "status"], _skip_policy=True)
         return data if isinstance(data, dict) else {}
 
     # ------------------------------------------------------------------
@@ -130,14 +261,30 @@ class GWSClient:
         return []
 
     def gmail_send(self, to: str, subject: str, body: str) -> dict[str, Any] | None:
-        """Send an email via gws."""
-        return self._run_json([
+        """Send an email via gws.
+
+        Subject to recipient filtering and per-hour rate limiting.
+        """
+        # Recipient check happens before the normal policy evaluation
+        ok, reason = self._policy.check_recipient(to)
+        if not ok:
+            raise GWSPolicyError(PolicyDecision(
+                allowed=False,
+                reason=reason,
+                classification=classify_action(["gmail", "+send"]),
+            ))
+
+        result = self._run_json([
             "gmail", "+send",
             "--to", to,
             "--subject", subject,
             "--body", body,
             "--output-format", "json",
         ])
+        # Record successful send for rate limiting
+        if result is not None:
+            self._policy.record_send()
+        return result
 
     def gmail_triage(self) -> Any:
         """Run gmail triage helper."""
@@ -199,7 +346,11 @@ class GWSClient:
     # ------------------------------------------------------------------
 
     def raw(self, *args: str, timeout: int = 15) -> dict[str, Any] | list | None:
-        """Run an arbitrary gws command and parse JSON output."""
+        """Run an arbitrary gws command and parse JSON output.
+
+        This is the most dangerous entry point — full policy enforcement
+        applies including classification, rate limiting, and confirmation.
+        """
         return self._run_json(list(args), timeout=timeout)
 
 
@@ -207,9 +358,28 @@ class GWSClient:
 _default_client: GWSClient | None = None
 
 
-def get_client() -> GWSClient:
-    """Return a shared GWSClient instance."""
+def get_client(policy_config: GWSPolicyConfig | None = None) -> GWSClient:
+    """Return a shared GWSClient instance.
+
+    On first call, attempts to load ``[gws_policy]`` from AFS config TOML.
+    Pass *policy_config* to override.
+    """
     global _default_client
     if _default_client is None:
-        _default_client = GWSClient()
+        if policy_config is None:
+            policy_config = _load_policy_from_config()
+        _default_client = GWSClient(policy_config=policy_config)
     return _default_client
+
+
+def _load_policy_from_config() -> GWSPolicyConfig | None:
+    """Try to load gws_policy section from AFS config."""
+    try:
+        from .config import load_config
+        cfg = load_config()
+        section = cfg.get("gws_policy")
+        if isinstance(section, dict):
+            return GWSPolicyConfig.from_dict(section)
+    except Exception:
+        pass
+    return None

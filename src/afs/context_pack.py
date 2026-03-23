@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,7 +15,7 @@ from .embeddings import search_embedding_index
 from .manager import AFSManager
 from .models import MountType
 from .sensitivity import matches_path_rules
-from .session_bootstrap import build_session_bootstrap
+from .session_bootstrap import _build_recommendations, build_session_bootstrap
 
 DEFAULT_CONTEXT_PACK_TOKENS = {
     "generic": 8000,
@@ -28,6 +29,7 @@ DEFAULT_SEARCH_MOUNTS = (
     MountType.KNOWLEDGE,
     MountType.ITEMS,
 )
+CONTEXT_PACK_CACHE_VERSION = 1
 
 
 @dataclass
@@ -72,7 +74,26 @@ def build_context_pack(
     context_path = context_path.expanduser().resolve()
     normalized_model = _normalize_model(model)
     resolved_budget = token_budget or DEFAULT_CONTEXT_PACK_TOKENS[normalized_model]
-    bootstrap = build_session_bootstrap(manager, context_path)
+    bootstrap = build_session_bootstrap(manager, context_path, record_event=False)
+    cached_bootstrap = _cache_bootstrap(manager, context_path, bootstrap)
+    cache_key = _context_pack_cache_key(
+        context_path,
+        bootstrap=cached_bootstrap,
+        query=query,
+        model=normalized_model,
+        token_budget=resolved_budget,
+        include_content=include_content,
+        max_query_results=max_query_results,
+        max_embedding_results=max_embedding_results,
+    )
+    cached = _load_cached_context_pack(
+        manager,
+        context_path,
+        model=normalized_model,
+        cache_key=cache_key,
+    )
+    if cached is not None:
+        return cached
     guidance = _model_guidance(normalized_model)
     sections = _build_sections(
         manager,
@@ -100,6 +121,11 @@ def build_context_pack(
         "sections": [section.to_dict() for section in chosen],
         "sources": sources,
         "omitted_sections": [section.title for section in omitted],
+        "cache": {
+            "version": CONTEXT_PACK_CACHE_VERSION,
+            "key": cache_key,
+            "hit": False,
+        },
     }
 
 
@@ -137,13 +163,18 @@ def write_context_pack_artifacts(
     pack: dict[str, Any],
 ) -> dict[str, str]:
     """Persist the latest context pack for wrappers and agent handoff."""
-    output_root = resolve_agent_output_root(context_path, config=manager.config)
-    output_root.mkdir(parents=True, exist_ok=True)
-    suffix = pack["model"].replace("/", "_")
-    json_path = output_root / f"session_pack_{suffix}.json"
-    markdown_path = output_root / f"session_pack_{suffix}.md"
+    json_path, markdown_path = _context_pack_artifact_paths(
+        manager,
+        context_path,
+        pack["model"],
+    )
+    json_path.parent.mkdir(parents=True, exist_ok=True)
 
     payload = dict(pack)
+    cache = dict(payload.get("cache") or {})
+    cache.setdefault("version", CONTEXT_PACK_CACHE_VERSION)
+    cache["hit"] = False
+    payload["cache"] = cache
     payload["generated_at"] = datetime.now(timezone.utc).isoformat()
     payload["artifact_paths"] = {
         "json": str(json_path),
@@ -152,6 +183,159 @@ def write_context_pack_artifacts(
     json_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     markdown_path.write_text(render_context_pack(payload) + "\n", encoding="utf-8")
     return payload["artifact_paths"]
+
+
+def _context_pack_artifact_paths(
+    manager: AFSManager,
+    context_path: Path,
+    model: str,
+) -> tuple[Path, Path]:
+    output_root = resolve_agent_output_root(context_path, config=manager.config)
+    suffix = model.replace("/", "_")
+    return (
+        output_root / f"session_pack_{suffix}.json",
+        output_root / f"session_pack_{suffix}.md",
+    )
+
+
+def _context_pack_cache_key(
+    context_path: Path,
+    *,
+    bootstrap: dict[str, Any],
+    query: str,
+    model: str,
+    token_budget: int,
+    include_content: bool,
+    max_query_results: int,
+    max_embedding_results: int,
+) -> str:
+    payload = {
+        "version": CONTEXT_PACK_CACHE_VERSION,
+        "context_path": str(context_path),
+        "query": query,
+        "model": model,
+        "token_budget": token_budget,
+        "include_content": include_content,
+        "max_query_results": max_query_results,
+        "max_embedding_results": max_embedding_results,
+        "bootstrap": bootstrap,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _cache_bootstrap(
+    manager: AFSManager,
+    context_path: Path,
+    bootstrap: dict[str, Any],
+) -> dict[str, Any]:
+    result = json.loads(json.dumps(bootstrap, default=str))
+    scratch = resolve_mount_root(context_path, MountType.SCRATCHPAD, config=manager.config)
+    output = resolve_agent_output_root(context_path, config=manager.config)
+    try:
+        prefix = str(output.relative_to(scratch)).replace("\\", "/").strip("/")
+    except ValueError:
+        prefix = ""
+
+    if not prefix:
+        return result
+
+    ignored = 0
+    if output.exists():
+        ignored = sum(1 for item in output.rglob("*") if item.is_file())
+
+    status = result.get("status")
+    if isinstance(status, dict):
+        counts = status.get("mount_counts")
+        if isinstance(counts, dict):
+            counts.pop(MountType.HISTORY.value, None)
+            counts.pop(MountType.GLOBAL.value, None)
+            current = counts.get("scratchpad", 0)
+            if isinstance(current, int):
+                counts["scratchpad"] = max(0, current - ignored)
+            status["total_files"] = sum(value for value in counts.values() if isinstance(value, int))
+        index = status.get("index")
+        if isinstance(index, dict):
+            status["index"] = {"enabled": bool(index.get("enabled", False))}
+
+    diff = result.get("diff")
+    if isinstance(diff, dict):
+        removed = 0
+        for key in ("added", "modified", "deleted"):
+            items = diff.get(key)
+            if not isinstance(items, list):
+                continue
+            keep = []
+            for item in items:
+                if _is_agent_artifact(item, prefix):
+                    removed += 1
+                    continue
+                keep.append(item)
+            diff[key] = keep
+        total = diff.get("total_changes")
+        if isinstance(total, int):
+            diff["total_changes"] = max(0, total - removed)
+            diff["available"] = diff["total_changes"] > 0
+        diff["error"] = ""
+        diff.pop("truncated", None)
+
+    stale = result.get("stale_mounts")
+    if isinstance(stale, list):
+        result["stale_mounts"] = [
+            item for item in stale
+            if item not in {MountType.HISTORY.value, MountType.GLOBAL.value}
+        ]
+
+    result["recommended_actions"] = _build_recommendations(result)
+    return result
+
+
+def _is_agent_artifact(item: Any, prefix: str) -> bool:
+    if not isinstance(item, dict):
+        return False
+    mount = item.get("mount_type")
+    if mount in {MountType.HISTORY.value, MountType.GLOBAL.value}:
+        return True
+    if mount != MountType.SCRATCHPAD.value:
+        return False
+    rel = item.get("relative_path")
+    if not isinstance(rel, str):
+        return False
+    rel = rel.replace("\\", "/").strip("/")
+    return rel == prefix or rel.startswith(f"{prefix}/")
+
+
+def _load_cached_context_pack(
+    manager: AFSManager,
+    context_path: Path,
+    *,
+    model: str,
+    cache_key: str,
+) -> dict[str, Any] | None:
+    json_path, markdown_path = _context_pack_artifact_paths(manager, context_path, model)
+    if not json_path.exists():
+        return None
+    try:
+        payload = json.loads(json_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    cache = payload.get("cache")
+    if not isinstance(cache, dict):
+        return None
+    if cache.get("version") != CONTEXT_PACK_CACHE_VERSION:
+        return None
+    if cache.get("key") != cache_key:
+        return None
+    result = dict(payload)
+    result["artifact_paths"] = {
+        "json": str(json_path),
+        "markdown": str(markdown_path),
+    }
+    result["cache"] = {
+        **cache,
+        "hit": True,
+    }
+    return result
 
 
 def _normalize_model(model: str) -> str:

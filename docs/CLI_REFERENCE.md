@@ -93,6 +93,27 @@ metadata-first history events, writes durable summaries into
 `memory/history_consolidation/`, and checkpoints incremental progress under
 `.context/scratchpad/afs_agents/history_memory_checkpoint.json`.
 
+## Journal Agent
+
+```bash
+# Daily routine: carry yesterday's TODOs into tomorrow's template + stale alert
+./scripts/afs agents run journal-agent
+
+# Generate tomorrow's entry only
+./scripts/afs agents run journal-agent -- --task template-gen
+
+# Check for stuck TODOs (3+ consecutive days unchecked)
+./scripts/afs agents run journal-agent -- --task stale-check --pretty
+
+# Draft this week's review
+./scripts/afs agents run journal-agent -- --task weekly-review
+
+# Draft a specific past week (overwrite)
+./scripts/afs agents run journal-agent -- --task weekly-review --week 2026-W11 --overwrite
+```
+
+See `docs/JOURNAL_AGENT.md` for full argument reference and JSON output shape.
+
 ## Session
 
 ```bash
@@ -117,16 +138,18 @@ It also refreshes:
 - `.context/scratchpad/afs_agents/session_bootstrap.json`
 - `.context/scratchpad/afs_agents/session_bootstrap.md`
 
-`session pack` is the compact follow-on surface when an agent needs a bounded
+`session pack` is the explicit follow-on surface when an agent needs a bounded
 working set for Gemini, Claude, Codex, or a generic client. It builds a
 token-budgeted packet from bootstrap state, scratchpad, queued tasks, hivemind,
-durable memory, and indexed retrieval hits, then writes:
+durable memory, and indexed retrieval hits, then writes or reuses:
 
 - `.context/scratchpad/afs_agents/session_pack_<model>.json`
 - `.context/scratchpad/afs_agents/session_pack_<model>.md`
 
 `never_export` sensitivity rules are applied to indexed content included in the
-pack, so blocked paths do not leak into session exports.
+pack, so blocked paths do not leak into session exports. When the bootstrap
+snapshot and pack inputs have not changed, repeated calls reuse the stored
+artifact instead of rebuilding from scratch.
 
 ## Events
 

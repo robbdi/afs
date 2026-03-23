@@ -1,0 +1,47 @@
+# GWS Policy Configuration for AFS
+# Copy the [gws_policy] section into your AFS config TOML to customize.
+#
+# Risk tiers:
+#   read      — List messages, view calendar, browse Drive. Always allowed.
+#   notify    — Create drafts, copy files. Allowed, logged.
+#   mutate    — Send email, create events, upload files. Requires confirmation.
+#   dangerous — Delete, trash, change permissions. Always requires confirmation.
+
+[gws_policy]
+
+# Master switch — set to false to disable all policy checks.
+enabled = true
+
+# Auto-approve mutate-tier actions without human confirmation.
+# Default: false (sends, event creation, uploads all require confirmation).
+auto_approve_mutate = false
+
+# Auto-approve notify-tier actions (drafts, copies).
+# Default: true (these are low-risk).
+auto_approve_notify = true
+
+# Maximum outbound emails per hour via gmail_send / raw send.
+# Set to 0 for unlimited (not recommended).
+rate_limit_sends_per_hour = 10
+
+# Glob patterns for blocked email recipients.
+# Prevents agents from accidentally emailing the wrong people.
+blocked_recipients = [
+    # "*@competitor.com",
+    # "ceo@example.com",
+]
+
+# Block specific Drive sub-commands.
+# Example: prevent agents from ever touching sharing permissions.
+blocked_drive_actions = [
+    "permissions.delete",
+    "permissions.create",
+    "permissions.update",
+]
+
+# Restrict which GWS services agents can use at all.
+# Empty list = all services allowed. Uncomment to restrict:
+# allowed_services = ["gmail", "calendar", "drive"]
+
+# Log every GWS operation to the AFS audit log, including reads.
+log_all = true

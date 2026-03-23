@@ -9,7 +9,7 @@ export class FileService {
   constructor(private readonly transport: ITransportClient) {}
 
   async read(filePath: string): Promise<string> {
-    const result = await this.transport.callTool("fs.read", { path: filePath });
+    const result = await this.transport.callTool("context.read", { path: filePath });
     return result.content as string;
   }
 
@@ -18,7 +18,7 @@ export class FileService {
     content: string,
     options?: { append?: boolean; mkdirs?: boolean },
   ): Promise<{ path: string; bytes: number }> {
-    const result = await this.transport.callTool("fs.write", {
+    const result = await this.transport.callTool("context.write", {
       path: filePath,
       content,
       append: options?.append ?? false,
@@ -28,7 +28,7 @@ export class FileService {
   }
 
   async list(dirPath: string, maxDepth?: number): Promise<FileEntry[]> {
-    const result = await this.transport.callTool("fs.list", {
+    const result = await this.transport.callTool("context.list", {
       path: dirPath,
       max_depth: maxDepth ?? 1,
     });

@@ -31,7 +31,6 @@ def test_events_tail_uses_resolved_project_context(
         config=AFSConfig(
             general=GeneralConfig(
                 context_root=context_root,
-                agent_workspaces_dir=context_root / "workspaces",
             )
         )
     )
@@ -71,7 +70,6 @@ def test_events_analytics_reports_mcp_metrics(
         config=AFSConfig(
             general=GeneralConfig(
                 context_root=context_root,
-                agent_workspaces_dir=context_root / "workspaces",
             )
         )
     )
@@ -117,7 +115,6 @@ def test_events_replay_filters_by_session_id(
         config=AFSConfig(
             general=GeneralConfig(
                 context_root=context_root,
-                agent_workspaces_dir=context_root / "workspaces",
             )
         )
     )

@@ -1,8 +1,8 @@
 {
   "name": "afs-vscode",
   "displayName": "AFS - Agentic File System",
-  "description": "Context management and visualization for the Agentic File System",
-  "version": "0.1.0",
+  "description": "Context management, training pipeline, and Antigravity integration for AFS",
+  "version": "0.2.0",
   "publisher": "scawful",
   "license": "MIT",
   "repository": {
@@ -15,15 +15,20 @@
   "categories": ["Other"],
   "main": "./dist/extension.js",
   "activationEvents": [
+    "*",
+    "onStartupFinished",
     "workspaceContains:**/.context/metadata.json",
-    "onView:afs.contextExplorer"
+    "onView:afs.dashboard",
+    "onView:afs.contextExplorer",
+    "onView:afs.training",
+    "onView:afs.commands"
   ],
   "contributes": {
     "viewsContainers": {
       "activitybar": [
         {
           "id": "afs-explorer",
-          "title": "AFS Context",
+          "title": "AFS",
           "icon": "media/icons/afs-logo.svg"
         }
       ]
@@ -31,9 +36,23 @@
     "views": {
       "afs-explorer": [
         {
+          "id": "afs.dashboard",
+          "name": "Dashboard",
+          "type": "webview"
+        },
+        {
           "id": "afs.contextExplorer",
           "name": "Contexts",
           "contextualTitle": "AFS Context Explorer"
+        },
+        {
+          "id": "afs.training",
+          "name": "Training",
+          "type": "webview"
+        },
+        {
+          "id": "afs.commands",
+          "name": "Commands"
         }
       ]
     },
@@ -57,11 +76,49 @@
       { "command": "afs.mcp.status", "title": "AFS: MCP Status", "category": "AFS" },
       { "command": "afs.server.restart", "title": "AFS: Restart Server", "category": "AFS" },
       { "command": "afs.server.showLogs", "title": "AFS: Show Server Logs", "category": "AFS" },
-      { "command": "afs.treeView.refresh", "title": "AFS: Refresh Context Explorer", "icon": "$(refresh)", "category": "AFS" }
+      { "command": "afs.treeView.refresh", "title": "AFS: Refresh Context Explorer", "icon": "$(refresh)", "category": "AFS" },
+      { "command": "afs.dashboard.refresh", "title": "AFS: Refresh Dashboard", "icon": "$(refresh)", "category": "AFS" },
+      { "command": "afs.training.refresh", "title": "AFS: Refresh Training", "icon": "$(refresh)", "category": "AFS" },
+      { "command": "afs.commands.refresh", "title": "AFS: Refresh Commands", "icon": "$(refresh)", "category": "AFS" },
+      { "command": "afs.training.freshnessGate", "title": "AFS: Freshness Gate", "category": "AFS" },
+      { "command": "afs.training.extractSessions", "title": "AFS: Extract Session Data", "category": "AFS" },
+      { "command": "afs.training.generateRouter", "title": "AFS: Generate Router Dataset", "category": "AFS" },
+      { "command": "afs.training.exportAntigravity", "title": "AFS: Export Antigravity Trajectories", "category": "AFS" }
+    ],
+    "submenus": [
+      {
+        "id": "afs.menu",
+        "label": "AFS"
+      }
     ],
     "menus": {
+      "menubar/view": [
+        {
+          "submenu": "afs.menu",
+          "group": "9_afs"
+        }
+      ],
+      "afs.menu": [
+        { "command": "afs.context.discover", "group": "1_context" },
+        { "command": "afs.context.init", "group": "1_context" },
+        { "command": "afs.context.mount", "group": "1_context" },
+        { "command": "afs.index.rebuild", "group": "2_index" },
+        { "command": "afs.index.query", "group": "2_index" },
+        { "command": "afs.index.queryQuickOpen", "group": "2_index" },
+        { "command": "afs.training.freshnessGate", "group": "3_training" },
+        { "command": "afs.training.extractSessions", "group": "3_training" },
+        { "command": "afs.training.generateRouter", "group": "3_training" },
+        { "command": "afs.training.exportAntigravity", "group": "3_training" },
+        { "command": "afs.mcp.register", "group": "4_server" },
+        { "command": "afs.mcp.status", "group": "4_server" },
+        { "command": "afs.server.restart", "group": "4_server" },
+        { "command": "afs.server.showLogs", "group": "4_server" }
+      ],
       "view/title": [
-        { "command": "afs.treeView.refresh", "when": "view == afs.contextExplorer", "group": "navigation" }
+        { "command": "afs.treeView.refresh", "when": "view == afs.contextExplorer", "group": "navigation" },
+        { "command": "afs.dashboard.refresh", "when": "view == afs.dashboard", "group": "navigation" },
+        { "command": "afs.training.refresh", "when": "view == afs.training", "group": "navigation" },
+        { "command": "afs.commands.refresh", "when": "view == afs.commands", "group": "navigation" }
       ],
       "view/item/context": [
         { "command": "afs.context.mount", "when": "view == afs.contextExplorer && viewItem == contextRoot" },
@@ -131,7 +188,7 @@
         "afs.mcp.autoRegister": {
           "type": "boolean",
           "default": false,
-          "description": "Auto-register AFS in editor MCP config on activation. (Not recommended — use afs.mcp.register command instead.)"
+          "description": "Auto-register AFS in editor MCP config on activation."
         },
         "afs.mcp.configPath": {
           "type": "string",
@@ -153,6 +210,16 @@
           "enum": ["off", "error", "warn", "info", "debug", "trace"],
           "default": "info",
           "description": "Log level for the AFS output channel."
+        },
+        "afs.antigravity.dbPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to Antigravity state.vscdb. Defaults to ~/Library/Application Support/Antigravity/User/globalStorage/state.vscdb."
+        },
+        "afs.antigravity.contextRoot": {
+          "type": "string",
+          "default": "",
+          "description": "Path to Antigravity context root (~/.gemini/antigravity)."
         }
       }
     }

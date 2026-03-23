@@ -23,7 +23,13 @@ def test_query_events_returns_recent(tmp_path: Path) -> None:
     history_root = tmp_path / "history"
     history_root.mkdir()
     append_history_event(history_root, "cli", "afs.cli", op="invoke", metadata={"argv": ["status"]})
-    append_history_event(history_root, "mcp_tool", "afs.mcp", op="call", metadata={"tool_name": "fs.read"})
+    append_history_event(
+        history_root,
+        "mcp_tool",
+        "afs.mcp",
+        op="call",
+        metadata={"tool_name": "context.read"},
+    )
     events = query_events(history_root, limit=10)
     assert len(events) == 2
     assert events[0]["type"] == "cli"

@@ -1,3 +1,5 @@
+import * as os from "os";
+import * as path from "path";
 import * as vscode from "vscode";
 import type { ContextService } from "../services/contextService";
 import type { FileService } from "../services/fileService";
@@ -52,6 +54,9 @@ export class ContextTreeProvider implements vscode.TreeDataProvider<ContextTreeI
     if (element instanceof MountTypeItem) {
       return this.getFiles(element.contextPath, element.mountType);
     }
+    if (element instanceof ContextFileItem && element.isDir) {
+      return this.getDirectoryChildren(element.filePath);
+    }
     return [];
   }
 
@@ -61,9 +66,24 @@ export class ContextTreeProvider implements vscode.TreeDataProvider<ContextTreeI
     } catch {
       this.contexts = [];
     }
-    return this.contexts.map(
-      (ctx) => new ContextRootItem(ctx.project, ctx.path, ctx.valid, ctx.mounts),
+
+    const items: ContextTreeItem[] = [];
+
+    // Add global ~/.context if it exists
+    const globalContext = path.join(os.homedir(), ".context");
+    const alreadyIncluded = this.contexts.some(
+      (ctx) => ctx.path === globalContext || ctx.path === path.resolve(globalContext),
     );
+    if (!alreadyIncluded) {
+      items.push(new ContextRootItem("~/.context", globalContext, true, 0));
+    }
+
+    // Add discovered contexts
+    for (const ctx of this.contexts) {
+      items.push(new ContextRootItem(ctx.project, ctx.path, ctx.valid, ctx.mounts));
+    }
+
+    return items;
   }
 
   private async getMountTypes(contextPath: string): Promise<MountTypeItem[]> {
@@ -92,6 +112,20 @@ export class ContextTreeProvider implements vscode.TreeDataProvider<ContextTreeI
     try {
       const entries = await this.fileService.list(`${contextPath}/${mountType}`, 1);
       return entries.map((e) => new ContextFileItem(e.path, e.is_dir));
+    } catch {
+      return [];
+    }
+  }
+
+  private async getDirectoryChildren(
+    dirPath: string,
+  ): Promise<ContextFileItem[]> {
+    try {
+      const entries = await this.fileService.list(dirPath, 1);
+      // Filter out the directory itself (rglob can return the root)
+      return entries
+        .filter((e) => e.path !== dirPath)
+        .map((e) => new ContextFileItem(e.path, e.is_dir));
     } catch {
       return [];
     }

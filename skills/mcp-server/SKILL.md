@@ -19,6 +19,7 @@ AFS exposes all context operations as MCP tools over stdio JSON-RPC.
 
 ```bash
 afs mcp serve                          # start MCP server
+python -m afs.mcp_server              # direct stdio server entrypoint
 python -m afs.mcp_server --demo       # demo mode with sample data
 python -m afs.mcp_server --verbose    # debug logging to stderr
 ```
@@ -36,12 +37,13 @@ python -m afs.mcp_server --verbose    # debug logging to stderr
 - `context.status` — show context health
 - `context.repair` — fix broken context state
 
-### Filesystem
-- `fs.list` — list files in a mount
-- `fs.read` — read file contents
-- `fs.write` — write file contents
-- `fs.delete` — delete a file from a mount
-- `fs.move` — move/rename a file within mounts
+### Files
+- `context.list` — preferred file listing
+- `context.read` — preferred file read
+- `context.write` — preferred file write
+- `context.delete` — preferred file delete
+- `context.move` — preferred file move/rename
+- `fs.*` — legacy compatibility aliases for the same file operations
 
 ### Agents
 - `agent.spawn` — start a background agent
@@ -72,9 +74,28 @@ Add to `~/.claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "afs": {
-      "command": "/path/to/afs",
-      "args": ["mcp", "serve"]
+      "command": "/Users/scawful/src/lab/afs/.venv/bin/python",
+      "args": ["-m", "afs.mcp_server"],
+      "env": {
+        "AFS_ROOT": "/Users/scawful/src/lab/afs",
+        "AFS_VENV": "/Users/scawful/src/lab/afs/.venv",
+        "PYTHONPATH": "/Users/scawful/src/lab/afs/src"
+      }
     }
   }
 }
 ```
+
+Prefer the direct Python module entrypoint for Claude Desktop. The shell wrapper
+can be fine for terminal use, but Claude Desktop has been more reliable when it
+launches the venv Python directly.
+
+If Claude logs show `initialize` followed by a 60 second timeout:
+
+- inspect `~/Library/Logs/Claude/mcp-server-afs.log`
+- look for `Message from client: {"method":"initialize"...}`
+- if there is no matching `Message from server` response, switch to the direct
+  Python config above and restart Claude Desktop with `Cmd+Q`
+
+A stale `context_index` warning is non-blocking and should not be treated as
+the cause of an MCP startup failure.

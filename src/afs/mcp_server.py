@@ -40,7 +40,9 @@ from .session_bootstrap import (
 
 SERVER_NAME = "afs"
 SERVER_VERSION = "0.1.0"
-PROTOCOL_VERSION = "2024-11-05"
+PROTOCOL_VERSION = "2025-06-18"
+LEGACY_PROTOCOL_VERSION = "2024-11-05"
+SUPPORTED_PROTOCOL_VERSIONS = (PROTOCOL_VERSION, LEGACY_PROTOCOL_VERSION)
 _CORE_RESOURCE_URIS = {"afs://contexts", "afs://claude/bootstrap"}
 _CORE_RESOURCE_PREFIXES = ("afs://context/",)
 _CORE_PROMPT_NAMES = {
@@ -255,37 +257,62 @@ class MCPToolRegistry:
         return prompt.handler(arguments, manager)
 
 
-def _read_message(stream) -> dict[str, Any] | None:
+def _read_message(stream) -> tuple[dict[str, Any] | None, str | None]:
+    first = stream.read(1)
+    while first in (b"\r", b"\n"):
+        first = stream.read(1)
+    if first == b"":
+        return None, None
+
+    if first in (b"{", b"["):
+        line = first + stream.readline()
+        return json.loads(line.decode("utf-8")), "jsonl"
+
     headers: dict[str, str] = {}
+    header_bytes = bytearray(first)
     while True:
-        line = stream.readline()
-        if line == b"":
-            return None
-        if line in (b"\r\n", b"\n"):
+        chunk = stream.read(1)
+        if chunk == b"":
+            return None, None
+        header_bytes.extend(chunk)
+        if header_bytes.endswith(b"\r\n\r\n") or header_bytes.endswith(b"\n\n") or header_bytes.endswith(b"\r\r"):
             break
-        if b":" not in line:
+
+    header_text = (
+        header_bytes.decode("utf-8", errors="replace")
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+    )
+    for line in header_text.split("\n"):
+        if not line.strip() or ":" not in line:
             continue
-        key, value = line.decode("utf-8", errors="replace").split(":", 1)
+        key, value = line.split(":", 1)
         headers[key.strip().lower()] = value.strip()
 
     length_raw = headers.get("content-length")
     if not length_raw:
-        return None
+        return None, None
     try:
         length = int(length_raw)
     except ValueError:
-        return None
-    body = stream.read(length)
-    if not body:
-        return None
-    return json.loads(body.decode("utf-8"))
+        return None, None
+    body = bytearray()
+    while len(body) < length:
+        chunk = stream.read(length - len(body))
+        if chunk == b"":
+            return None, None
+        body.extend(chunk)
+    return json.loads(body.decode("utf-8")), "content-length"
 
 
-def _write_message(stream, payload: dict[str, Any]) -> None:
+def _write_message(stream, payload: dict[str, Any], mode: str = "content-length") -> None:
     raw = json.dumps(payload, ensure_ascii=True).encode("utf-8")
-    header = f"Content-Length: {len(raw)}\r\n\r\n".encode("ascii")
-    stream.write(header)
-    stream.write(raw)
+    if mode == "jsonl":
+        stream.write(raw + b"\n")
+    else:
+        header = f"Content-Length: {len(raw)}\r\n\r\n".encode("ascii")
+        stream.write(header)
+        stream.write(raw)
     stream.flush()
 
 
@@ -316,7 +343,6 @@ def _allowed_roots(manager: AFSManager) -> list[Path]:
 
     _add(Path.home() / ".context")
     _add(manager.config.general.context_root)
-    _add(manager.config.general.agent_workspaces_dir)
     for workspace in manager.config.general.workspace_directories:
         _add(workspace.path)
     for root in manager.config.general.mcp_allowed_roots:
@@ -1540,7 +1566,95 @@ def _tool_session_replay(arguments: dict[str, Any], manager: AFSManager) -> dict
     return build_session_timeline(context_path, session_id=session_id, since=since, limit=limit, config=manager.config)
 
 
+def _tool_alias_definition(
+    tool: MCPToolDefinition,
+    *,
+    name: str,
+    description: str | None = None,
+) -> MCPToolDefinition:
+    return MCPToolDefinition(
+        name=name,
+        description=description or tool.description,
+        input_schema=tool.input_schema,
+        handler=tool.handler,
+        source=tool.source,
+    )
+
+
 def _builtin_tool_definitions() -> list[MCPToolDefinition]:
+    fs_read = MCPToolDefinition(
+        name="fs.read",
+        description="Legacy compatibility alias for `context.read`. Read UTF-8 text from a context-scoped file after bootstrap or `context.status` anchors the active context.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Absolute or relative file path."},
+            },
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+        handler=_tool_fs_read,
+    )
+    fs_write = MCPToolDefinition(
+        name="fs.write",
+        description="Legacy compatibility alias for `context.write`. Write UTF-8 text to a context-scoped file, preferring scratchpad paths for working notes unless the user explicitly wants durable memory or knowledge updates.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "content": {"type": "string"},
+                "append": {"type": "boolean", "default": False},
+                "mkdirs": {"type": "boolean", "default": False},
+            },
+            "required": ["path", "content"],
+            "additionalProperties": False,
+        },
+        handler=_tool_fs_write,
+    )
+    fs_delete = MCPToolDefinition(
+        name="fs.delete",
+        description="Legacy compatibility alias for `context.delete`. Delete a file or directory under allowed context roots.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "recursive": {"type": "boolean", "default": False},
+            },
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+        handler=_tool_fs_delete,
+    )
+    fs_move = MCPToolDefinition(
+        name="fs.move",
+        description="Legacy compatibility alias for `context.move`. Move or rename a file or directory under allowed context roots.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "source": {"type": "string"},
+                "destination": {"type": "string"},
+                "mkdirs": {"type": "boolean", "default": False},
+            },
+            "required": ["source", "destination"],
+            "additionalProperties": False,
+        },
+        handler=_tool_fs_move,
+    )
+    fs_list = MCPToolDefinition(
+        name="fs.list",
+        description="Legacy compatibility alias for `context.list`. List files under a context-scoped path.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "max_depth": {"type": "integer", "default": 1},
+            },
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+        handler=_tool_fs_list,
+    )
+
     return [
         MCPToolDefinition(
             name="briefing",
@@ -1554,77 +1668,35 @@ def _builtin_tool_definitions() -> list[MCPToolDefinition]:
             },
             handler=_tool_briefing,
         ),
-        MCPToolDefinition(
-            name="fs.read",
-            description="Read UTF-8 text from a context-scoped file. Prefer this after `afs.session.bootstrap` or `context.status` so reads stay anchored in the active context.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Absolute or relative file path."},
-                },
-                "required": ["path"],
-                "additionalProperties": False,
-            },
-            handler=_tool_fs_read,
+        fs_read,
+        _tool_alias_definition(
+            fs_read,
+            name="context.read",
+            description="Preferred agent-facing file read. Read UTF-8 text from a context-scoped file.",
         ),
-        MCPToolDefinition(
-            name="fs.write",
-            description="Write UTF-8 text to a context-scoped file. Prefer scratchpad paths for working notes unless the user explicitly wants durable memory or knowledge updates.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string"},
-                    "content": {"type": "string"},
-                    "append": {"type": "boolean", "default": False},
-                    "mkdirs": {"type": "boolean", "default": False},
-                },
-                "required": ["path", "content"],
-                "additionalProperties": False,
-            },
-            handler=_tool_fs_write,
+        fs_write,
+        _tool_alias_definition(
+            fs_write,
+            name="context.write",
+            description="Preferred agent-facing file write. Write UTF-8 text to a context-scoped file.",
         ),
-        MCPToolDefinition(
-            name="fs.delete",
-            description="Delete a file or directory under allowed context roots.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string"},
-                    "recursive": {"type": "boolean", "default": False},
-                },
-                "required": ["path"],
-                "additionalProperties": False,
-            },
-            handler=_tool_fs_delete,
+        fs_delete,
+        _tool_alias_definition(
+            fs_delete,
+            name="context.delete",
+            description="Preferred agent-facing file delete. Delete a file or directory under allowed context roots.",
         ),
-        MCPToolDefinition(
-            name="fs.move",
-            description="Move or rename a file or directory under allowed context roots.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "source": {"type": "string"},
-                    "destination": {"type": "string"},
-                    "mkdirs": {"type": "boolean", "default": False},
-                },
-                "required": ["source", "destination"],
-                "additionalProperties": False,
-            },
-            handler=_tool_fs_move,
+        fs_move,
+        _tool_alias_definition(
+            fs_move,
+            name="context.move",
+            description="Preferred agent-facing file move. Move or rename a file or directory under allowed context roots.",
         ),
-        MCPToolDefinition(
-            name="fs.list",
-            description="List files under a context-scoped path.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string"},
-                    "max_depth": {"type": "integer", "default": 1},
-                },
-                "required": ["path"],
-                "additionalProperties": False,
-            },
-            handler=_tool_fs_list,
+        fs_list,
+        _tool_alias_definition(
+            fs_list,
+            name="context.list",
+            description="Preferred agent-facing file listing. List files under a context-scoped path.",
         ),
         MCPToolDefinition(
             name="context.discover",
@@ -1773,7 +1845,7 @@ def _builtin_tool_definitions() -> list[MCPToolDefinition]:
         ),
         MCPToolDefinition(
             name="session.pack",
-            description="Build a token-budgeted context pack for Gemini, Claude, Codex, or generic clients. Use this after bootstrap when the agent needs a compact cited working set.",
+            description="Build a token-budgeted context pack for Gemini, Claude, Codex, or generic clients. Use this after bootstrap when the agent needs a compact cited working set; repeated calls can reuse the last artifact-backed pack when the bootstrap snapshot and pack inputs have not changed.",
             input_schema={
                 "type": "object",
                 "properties": {
@@ -3320,13 +3392,25 @@ def _handle_request(
     active_registry = registry or build_mcp_registry(manager)
 
     if method == "initialize":
+        params = request.get("params", {})
+        requested_protocol = (
+            params.get("protocolVersion")
+            if isinstance(params, dict)
+            else None
+        )
+        negotiated_protocol = (
+            requested_protocol
+            if requested_protocol in SUPPORTED_PROTOCOL_VERSIONS
+            else PROTOCOL_VERSION
+        )
         return _success_response(
             request_id,
             {
-                "protocolVersion": PROTOCOL_VERSION,
+                "protocolVersion": negotiated_protocol,
                 "capabilities": {
+                    "experimental": {},
                     "tools": {"listChanged": False},
-                    "resources": {"listChanged": False},
+                    "resources": {"subscribe": False, "listChanged": False},
                     "prompts": {"listChanged": False},
                 },
                 "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
@@ -3482,20 +3566,30 @@ def serve(config_path: Path | None = None, *, demo: bool = False) -> int:
     config = load_config_model(config_path=config_path, merge_user=True)
     manager = AFSManager(config=config)
     registry = build_mcp_registry(manager)
+    response_mode = "content-length"
 
-    _startup_diagnostics(config_path)
+    # Run diagnostics in background thread so the MCP message loop starts
+    # immediately — Claude Desktop times out if initialize takes >60s.
+    import threading
+    threading.Thread(
+        target=_startup_diagnostics,
+        args=(config_path,),
+        daemon=True,
+    ).start()
 
     if demo:
         _setup_demo_context(manager)
 
     while True:
         try:
-            message = _read_message(sys.stdin.buffer)
+            message, detected_mode = _read_message(sys.stdin.buffer)
             if message is None:
                 break
+            if detected_mode is not None:
+                response_mode = detected_mode
             response = _handle_request(message, manager, registry=registry)
             if response is not None:
-                _write_message(sys.stdout.buffer, response)
+                _write_message(sys.stdout.buffer, response, mode=response_mode)
         except json.JSONDecodeError as exc:
             print(f"[afs-mcp] malformed message: {exc}", file=sys.stderr)
             continue

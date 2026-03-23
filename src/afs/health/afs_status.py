@@ -21,10 +21,6 @@ from ..history import iter_history_events
 from ..manager import AFSManager
 from ..mcp_server import get_mcp_status
 from ..models import MountType
-from ..monorepo_bridge import (
-    DEFAULT_ACTIVE_WORKSPACE_STALE_SECONDS,
-    get_workspace_bridge_status,
-)
 from ..plugins import discover_extension_manifests, load_enabled_extensions
 from ..profiles import merge_extension_hooks, resolve_active_profile
 from ..services.manager import ServiceManager
@@ -78,7 +74,6 @@ def collect_afs_health(config_path: Path | None = None) -> dict[str, Any]:
         except Exception:
             mounts = {}
 
-    bridge_status = get_workspace_bridge_status(context_root, manager=manager)
     embeddings = _embedding_index_health(profile.knowledge_mounts)
     mcp_status = get_mcp_status(config_path=config_path)
     extensions = _extension_health(config, profile, mcp_status)
@@ -100,14 +95,6 @@ def collect_afs_health(config_path: Path | None = None) -> dict[str, Any]:
             "mounts": mounts,
             "mount_health": mount_health,
         },
-        "monorepo_bridge": {
-            "path": str(bridge_status.path),
-            "exists": bridge_status.exists,
-            "age_seconds": bridge_status.age_seconds,
-            "stale": bridge_status.stale,
-            "stale_after_seconds": DEFAULT_ACTIVE_WORKSPACE_STALE_SECONDS,
-            "modified_at": bridge_status.modified_at,
-        },
         "embeddings": embeddings,
         "extensions": extensions,
         "hooks": hooks,
@@ -120,7 +107,6 @@ def render_afs_health(snapshot: dict[str, Any]) -> str:
     """Render human-readable health output."""
     profile = snapshot["profile"]
     context = snapshot["context"]
-    bridge = snapshot["monorepo_bridge"]
     embeddings = snapshot["embeddings"]
     extensions = snapshot["extensions"]
     hooks = snapshot["hooks"]
@@ -167,14 +153,6 @@ def render_afs_health(snapshot: dict[str, Any]) -> str:
     )
     if mount_health["suggested_actions"]:
         lines.append("mount_actions: " + "; ".join(mount_health["suggested_actions"]))
-
-    bridge_age = _format_age(bridge["age_seconds"])
-    lines.append(
-        "monorepo_bridge: "
-        f"exists={str(bridge['exists']).lower()} "
-        f"stale={str(bridge['stale']).lower()} "
-        f"age={bridge_age}"
-    )
 
     lines.append(
         "embeddings: "

@@ -147,7 +147,6 @@ def test_log_session_event_respects_explicit_context_root(tmp_path, monkeypatch)
     config = AFSConfig(
         general=GeneralConfig(
             context_root=tmp_path / "other-context",
-            agent_workspaces_dir=(tmp_path / "other-context" / "workspaces"),
         )
     )
     context_root.mkdir(parents=True, exist_ok=True)
@@ -168,7 +167,6 @@ def test_context_fs_history_records_metadata_not_file_contents(tmp_path, monkeyp
     config = AFSConfig(
         general=GeneralConfig(
             context_root=context_root,
-            agent_workspaces_dir=context_root / "workspaces",
         ),
         history=HistoryConfig(include_payloads=True),
     )

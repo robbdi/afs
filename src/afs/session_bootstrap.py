@@ -121,9 +121,12 @@ def build_session_bootstrap(
     *,
     task_limit: int = 10,
     message_limit: int = 10,
+    agent_name: str = "cli",
+    record_event: bool = True,
 ) -> dict[str, Any]:
     """Build a structured startup packet for a context-aware agent session."""
     context_path = context_path.expanduser().resolve()
+    manager.register_agent(agent_name, context_path)
     context = manager.list_context(context_path=context_path)
     status = collect_context_status(manager, context_path)
     diff = collect_context_diff(manager, context_path)
@@ -171,15 +174,16 @@ def build_session_bootstrap(
         "stale_mounts": stale_mounts,
     }
     summary["recommended_actions"] = _build_recommendations(summary)
-    try:
-        from .history import log_session_event
-        log_session_event(
-            "bootstrap",
-            metadata={"context_path": str(context_path)},
-            context_root=context_path,
-        )
-    except Exception:
-        pass
+    if record_event:
+        try:
+            from .history import log_session_event
+            log_session_event(
+                "bootstrap",
+                metadata={"context_path": str(context_path)},
+                context_root=context_path,
+            )
+        except Exception:
+            pass
     return summary
 
 

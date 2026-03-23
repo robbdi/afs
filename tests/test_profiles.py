@@ -41,7 +41,6 @@ def test_resolve_profile_with_extension(tmp_path: Path) -> None:
     context_root = tmp_path / "context"
     general = GeneralConfig(
         context_root=context_root,
-        agent_workspaces_dir=context_root / "workspaces",
     )
     profiles = ProfilesConfig(
         active_profile="work",
@@ -80,7 +79,6 @@ def test_manager_applies_profile_mounts(tmp_path: Path) -> None:
     context_root = tmp_path / "context"
     general = GeneralConfig(
         context_root=context_root,
-        agent_workspaces_dir=context_root / "workspaces",
     )
 
     profiles = ProfilesConfig(

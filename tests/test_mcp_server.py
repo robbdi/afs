@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 
 from afs.agents.supervisor import AgentSupervisor
 from afs.history import append_history_event
 from afs.manager import AFSManager
-from afs.mcp_server import _handle_request, build_mcp_registry
+from afs.mcp_server import PROTOCOL_VERSION, _handle_request, _read_message, build_mcp_registry
 from afs.models import MountType
 from afs.schema import (
     AFSConfig,
@@ -26,7 +27,6 @@ def _make_manager(tmp_path: Path) -> AFSManager:
     context_root = tmp_path / "context"
     general = GeneralConfig(
         context_root=context_root,
-        agent_workspaces_dir=context_root / "workspaces",
     )
     manager = AFSManager(config=AFSConfig(general=general))
     project_path = tmp_path / "project"
@@ -58,7 +58,6 @@ def _make_remapped_manager(tmp_path: Path, **overrides: str) -> AFSManager:
     context_root = tmp_path / "context"
     general = GeneralConfig(
         context_root=context_root,
-        agent_workspaces_dir=context_root / "workspaces",
     )
     manager = AFSManager(
         config=AFSConfig(
@@ -72,18 +71,30 @@ def _make_remapped_manager(tmp_path: Path, **overrides: str) -> AFSManager:
     return manager
 
 
-def test_tools_list_returns_afs_tools(tmp_path: Path) -> None:
+PREFERRED_FILE_TOOLS = {
+    "context.read",
+    "context.write",
+    "context.delete",
+    "context.move",
+    "context.list",
+}
+
+COMPATIBILITY_FILE_TOOL_ALIASES = {
+    "fs.read",
+    "fs.write",
+    "fs.delete",
+    "fs.move",
+    "fs.list",
+}
+
+
+def test_tools_list_returns_preferred_and_compatibility_file_tools(tmp_path: Path) -> None:
     manager = _make_manager(tmp_path)
     response = _handle_request({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, manager)
     assert response is not None
     tools = response["result"]["tools"]
     names = {tool["name"] for tool in tools}
     assert {
-        "fs.read",
-        "fs.write",
-        "fs.delete",
-        "fs.move",
-        "fs.list",
         "context.discover",
         "context.init",
         "context.mount",
@@ -98,9 +109,13 @@ def test_tools_list_returns_afs_tools(tmp_path: Path) -> None:
         "events.replay",
         "hivemind.reap",
     }.issubset(names)
+    assert PREFERRED_FILE_TOOLS.issubset(names)
+    assert COMPATIBILITY_FILE_TOOL_ALIASES.issubset(names)
 
 
-def test_fs_write_and_read_tool_calls(tmp_path: Path) -> None:
+# Preferred file tool surface: daily agent-facing behavior should exercise
+# context.* directly, with fs.* covered separately as compatibility aliases.
+def test_context_write_and_read_tool_calls(tmp_path: Path) -> None:
     manager = _make_manager(tmp_path)
     target = manager.config.general.context_root / "scratchpad" / "notes.txt"
 
@@ -110,7 +125,7 @@ def test_fs_write_and_read_tool_calls(tmp_path: Path) -> None:
             "id": 2,
             "method": "tools/call",
             "params": {
-                "name": "fs.write",
+                "name": "context.write",
                 "arguments": {"path": str(target), "content": "hello", "mkdirs": True},
             },
         },
@@ -125,7 +140,7 @@ def test_fs_write_and_read_tool_calls(tmp_path: Path) -> None:
             "id": 3,
             "method": "tools/call",
             "params": {
-                "name": "fs.read",
+                "name": "context.read",
                 "arguments": {"path": str(target)},
             },
         },
@@ -133,6 +148,92 @@ def test_fs_write_and_read_tool_calls(tmp_path: Path) -> None:
     )
     assert read_response is not None
     assert read_response["result"]["structuredContent"]["content"] == "hello"
+
+
+# Compatibility aliases: keep explicit coverage that legacy fs.* names still
+# behave identically while the rest of the suite prefers context.*.
+def test_fs_file_aliases_match_context_tool_behavior(tmp_path: Path) -> None:
+    manager = _make_manager(tmp_path)
+    context_root = manager.config.general.context_root
+    source = context_root / "scratchpad" / "notes.txt"
+    moved = context_root / "scratchpad" / "renamed.txt"
+
+    write_response = _handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 230,
+            "method": "tools/call",
+            "params": {
+                "name": "fs.write",
+                "arguments": {"path": str(source), "content": "alias hello", "mkdirs": True},
+            },
+        },
+        manager,
+    )
+    assert write_response is not None
+    assert write_response["result"]["structuredContent"]["bytes"] == 11
+
+    read_response = _handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 231,
+            "method": "tools/call",
+            "params": {
+                "name": "fs.read",
+                "arguments": {"path": str(source)},
+            },
+        },
+        manager,
+    )
+    assert read_response is not None
+    assert read_response["result"]["structuredContent"]["content"] == "alias hello"
+
+    list_response = _handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 232,
+            "method": "tools/call",
+            "params": {
+                "name": "fs.list",
+                "arguments": {"path": str(context_root / "scratchpad"), "max_depth": 1},
+            },
+        },
+        manager,
+    )
+    assert list_response is not None
+    entries = list_response["result"]["structuredContent"]["entries"]
+    assert any(entry["path"].endswith("notes.txt") for entry in entries)
+
+    move_response = _handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 233,
+            "method": "tools/call",
+            "params": {
+                "name": "fs.move",
+                "arguments": {"source": str(source), "destination": str(moved)},
+            },
+        },
+        manager,
+    )
+    assert move_response is not None
+    assert moved.exists()
+    assert not source.exists()
+
+    delete_response = _handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 234,
+            "method": "tools/call",
+            "params": {
+                "name": "fs.delete",
+                "arguments": {"path": str(moved)},
+            },
+        },
+        manager,
+    )
+    assert delete_response is not None
+    assert not moved.exists()
 
 
 def test_events_analytics_tool_reports_mcp_usage(tmp_path: Path) -> None:
@@ -209,7 +310,7 @@ def test_events_replay_tool_filters_by_session_id(tmp_path: Path) -> None:
     assert content["count"] == 1
 
 
-def test_fs_list_allows_configured_workspace_root(tmp_path: Path) -> None:
+def test_context_list_allows_configured_workspace_root(tmp_path: Path) -> None:
     workspace_root = tmp_path / "google"
     workspace_root.mkdir()
     project_dir = workspace_root / "repo"
@@ -223,7 +324,6 @@ def test_fs_list_allows_configured_workspace_root(tmp_path: Path) -> None:
         config=AFSConfig(
             general=GeneralConfig(
                 context_root=context_root,
-                agent_workspaces_dir=context_root / "workspaces",
                 workspace_directories=[WorkspaceDirectory(path=workspace_root)],
             )
         )
@@ -235,7 +335,7 @@ def test_fs_list_allows_configured_workspace_root(tmp_path: Path) -> None:
             "id": 60,
             "method": "tools/call",
             "params": {
-                "name": "fs.list",
+                "name": "context.list",
                 "arguments": {"path": str(workspace_root), "max_depth": 2},
             },
         },
@@ -246,7 +346,7 @@ def test_fs_list_allows_configured_workspace_root(tmp_path: Path) -> None:
     assert any(entry["path"].endswith("README.md") for entry in entries)
 
 
-def test_fs_list_allows_configured_mcp_allowed_root(tmp_path: Path) -> None:
+def test_context_list_allows_configured_mcp_allowed_root(tmp_path: Path) -> None:
     allowed_root = tmp_path / "google"
     allowed_root.mkdir()
     (allowed_root / "WORKSPACE").write_text("configured root", encoding="utf-8")
@@ -258,7 +358,6 @@ def test_fs_list_allows_configured_mcp_allowed_root(tmp_path: Path) -> None:
         config=AFSConfig(
             general=GeneralConfig(
                 context_root=context_root,
-                agent_workspaces_dir=context_root / "workspaces",
                 mcp_allowed_roots=[allowed_root],
             )
         )
@@ -270,7 +369,7 @@ def test_fs_list_allows_configured_mcp_allowed_root(tmp_path: Path) -> None:
             "id": 66,
             "method": "tools/call",
             "params": {
-                "name": "fs.list",
+                "name": "context.list",
                 "arguments": {"path": str(allowed_root), "max_depth": 1},
             },
         },
@@ -281,7 +380,7 @@ def test_fs_list_allows_configured_mcp_allowed_root(tmp_path: Path) -> None:
     assert any(entry["path"].endswith("WORKSPACE") for entry in entries)
 
 
-def test_fs_list_allows_env_configured_mcp_root(tmp_path: Path, monkeypatch) -> None:
+def test_context_list_allows_env_configured_mcp_root(tmp_path: Path, monkeypatch) -> None:
     allowed_root = tmp_path / "google"
     allowed_root.mkdir()
     (allowed_root / "WORKSPACE").write_text("env root", encoding="utf-8")
@@ -294,7 +393,7 @@ def test_fs_list_allows_env_configured_mcp_root(tmp_path: Path, monkeypatch) -> 
             "id": 61,
             "method": "tools/call",
             "params": {
-                "name": "fs.list",
+                "name": "context.list",
                 "arguments": {"path": str(allowed_root), "max_depth": 1},
             },
         },
@@ -388,7 +487,6 @@ def test_context_init_allows_project_under_workspace_root_outside_cwd(tmp_path: 
         config=AFSConfig(
             general=GeneralConfig(
                 context_root=context_root,
-                agent_workspaces_dir=context_root / "workspaces",
                 workspace_directories=[WorkspaceDirectory(path=workspace_root)],
             )
         )
@@ -501,7 +599,6 @@ def test_context_index_uses_configured_db_filename(tmp_path: Path) -> None:
         config=AFSConfig(
             general=GeneralConfig(
                 context_root=context_root,
-                agent_workspaces_dir=context_root / "workspaces",
             ),
             context_index=ContextIndexConfig(db_filename="sqlite/context.db"),
         )
@@ -654,7 +751,6 @@ def test_context_repair_tool_remaps_missing_mount(tmp_path: Path) -> None:
         config=AFSConfig(
             general=GeneralConfig(
                 context_root=context_root,
-                agent_workspaces_dir=context_root / "workspaces",
                 workspace_directories=[WorkspaceDirectory(path=workspace_root)],
             )
         )
@@ -717,7 +813,6 @@ def test_context_query_respects_auto_index_config_default(tmp_path: Path) -> Non
         config=AFSConfig(
             general=GeneralConfig(
                 context_root=context_root,
-                agent_workspaces_dir=context_root / "workspaces",
             ),
             context_index=ContextIndexConfig(auto_index=False),
         )
@@ -780,7 +875,7 @@ def test_context_query_indexes_symlink_mount_content(tmp_path: Path) -> None:
     assert any(entry["relative_path"] == "docs/design.md" for entry in structured["entries"])
 
 
-def test_fs_write_keeps_context_query_fresh_without_rebuild(tmp_path: Path) -> None:
+def test_context_write_keeps_context_query_fresh_without_rebuild(tmp_path: Path) -> None:
     manager = _make_manager(tmp_path)
     context_root = manager.config.general.context_root
     target = context_root / "scratchpad" / "state.md"
@@ -809,7 +904,7 @@ def test_fs_write_keeps_context_query_fresh_without_rebuild(tmp_path: Path) -> N
             "id": 8,
             "method": "tools/call",
             "params": {
-                "name": "fs.write",
+                "name": "context.write",
                 "arguments": {
                     "path": str(target),
                     "content": "incremental freshness check",
@@ -844,7 +939,7 @@ def test_fs_write_keeps_context_query_fresh_without_rebuild(tmp_path: Path) -> N
     assert "index_rebuild" not in structured
 
 
-def test_fs_delete_updates_context_index(tmp_path: Path) -> None:
+def test_context_delete_updates_context_index(tmp_path: Path) -> None:
     manager = _make_manager(tmp_path)
     context_root = manager.config.general.context_root
     target = context_root / "scratchpad" / "delete_me.md"
@@ -873,7 +968,7 @@ def test_fs_delete_updates_context_index(tmp_path: Path) -> None:
             "id": 14,
             "method": "tools/call",
             "params": {
-                "name": "fs.delete",
+                "name": "context.delete",
                 "arguments": {"path": str(target)},
             },
         },
@@ -904,7 +999,7 @@ def test_fs_delete_updates_context_index(tmp_path: Path) -> None:
     assert not any(entry["relative_path"] == "delete_me.md" for entry in entries)
 
 
-def test_fs_delete_directory_removes_nested_index_entries(tmp_path: Path) -> None:
+def test_context_delete_directory_removes_nested_index_entries(tmp_path: Path) -> None:
     manager = _make_manager(tmp_path)
     context_root = manager.config.general.context_root
     docs_dir = context_root / "scratchpad" / "docs"
@@ -935,7 +1030,7 @@ def test_fs_delete_directory_removes_nested_index_entries(tmp_path: Path) -> Non
             "id": 43,
             "method": "tools/call",
             "params": {
-                "name": "fs.delete",
+                "name": "context.delete",
                 "arguments": {"path": str(docs_dir), "recursive": True},
             },
         },
@@ -966,7 +1061,7 @@ def test_fs_delete_directory_removes_nested_index_entries(tmp_path: Path) -> Non
     assert not any(entry["relative_path"].startswith("docs/") for entry in entries)
 
 
-def test_fs_move_updates_context_index(tmp_path: Path) -> None:
+def test_context_move_updates_context_index(tmp_path: Path) -> None:
     manager = _make_manager(tmp_path)
     context_root = manager.config.general.context_root
     source = context_root / "scratchpad" / "before.md"
@@ -996,7 +1091,7 @@ def test_fs_move_updates_context_index(tmp_path: Path) -> None:
             "id": 17,
             "method": "tools/call",
             "params": {
-                "name": "fs.move",
+                "name": "context.move",
                 "arguments": {"source": str(source), "destination": str(destination)},
             },
         },
@@ -1031,7 +1126,7 @@ def test_fs_move_updates_context_index(tmp_path: Path) -> None:
     assert not any(entry["relative_path"] == "before.md" for entry in entries)
 
 
-def test_fs_move_directory_updates_nested_context_index_entries(tmp_path: Path) -> None:
+def test_context_move_directory_updates_nested_context_index_entries(tmp_path: Path) -> None:
     manager = _make_manager(tmp_path)
     context_root = manager.config.general.context_root
     source_dir = context_root / "scratchpad" / "before"
@@ -1062,7 +1157,7 @@ def test_fs_move_directory_updates_nested_context_index_entries(tmp_path: Path) 
             "id": 46,
             "method": "tools/call",
             "params": {
-                "name": "fs.move",
+                "name": "context.move",
                 "arguments": {
                     "source": str(source_dir),
                     "destination": str(destination_dir),
@@ -1205,6 +1300,53 @@ def test_initialize_advertises_resources_and_prompts(tmp_path: Path) -> None:
     assert "tools" in caps
     assert "resources" in caps
     assert "prompts" in caps
+    assert response["result"]["protocolVersion"] == PROTOCOL_VERSION
+    assert caps["resources"]["subscribe"] is False
+
+
+def test_initialize_negotiates_supported_protocol_version(tmp_path: Path) -> None:
+    manager = _make_manager(tmp_path)
+    response = _handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 21,
+            "method": "initialize",
+            "params": {"protocolVersion": PROTOCOL_VERSION},
+        },
+        manager,
+    )
+    assert response is not None
+    assert response["result"]["protocolVersion"] == PROTOCOL_VERSION
+
+
+def test_read_message_accepts_lf_header_terminator() -> None:
+    body = b'{"jsonrpc":"2.0","id":1,"method":"ping"}'
+    stream = BytesIO(
+        f"Content-Length: {len(body)}\n\n".encode("ascii") + body
+    )
+
+    payload, mode = _read_message(stream)
+    assert mode == "content-length"
+    assert payload == {"jsonrpc": "2.0", "id": 1, "method": "ping"}
+
+
+def test_read_message_accepts_cr_header_terminator() -> None:
+    body = b'{"jsonrpc":"2.0","id":2,"method":"ping"}'
+    stream = BytesIO(
+        f"Content-Length: {len(body)}\r\r".encode("ascii") + body
+    )
+
+    payload, mode = _read_message(stream)
+    assert mode == "content-length"
+    assert payload == {"jsonrpc": "2.0", "id": 2, "method": "ping"}
+
+
+def test_read_message_accepts_jsonl_transport() -> None:
+    stream = BytesIO(b'{"jsonrpc":"2.0","id":3,"method":"ping"}\n')
+
+    payload, mode = _read_message(stream)
+    assert mode == "jsonl"
+    assert payload == {"jsonrpc": "2.0", "id": 3, "method": "ping"}
 
 
 def test_resources_list_returns_contexts_resource(tmp_path: Path) -> None:
@@ -1728,7 +1870,6 @@ def test_extension_mcp_tools_are_registered_and_callable(tmp_path: Path) -> None
         config=AFSConfig(
             general=GeneralConfig(
                 context_root=context_root,
-                agent_workspaces_dir=context_root / "workspaces",
             ),
             extensions=ExtensionsConfig(
                 enabled_extensions=["ext_workspace"],
@@ -1830,7 +1971,6 @@ def test_extension_mcp_server_registers_tools_resources_and_prompts(
         config=AFSConfig(
             general=GeneralConfig(
                 context_root=context_root,
-                agent_workspaces_dir=context_root / "workspaces",
             ),
             extensions=ExtensionsConfig(
                 enabled_extensions=["ext_workspace"],
@@ -1939,7 +2079,7 @@ def test_extension_mcp_server_conflicts_do_not_override_core_surface(
         "    return {\n"
         "        'tools': [\n"
         "            {\n"
-        "                'name': 'fs.read',\n"
+        "                'name': 'context.read',\n"
         "                'description': 'duplicate tool',\n"
         "                'handler': duplicate_tool,\n"
         "            }\n"
@@ -1970,7 +2110,6 @@ def test_extension_mcp_server_conflicts_do_not_override_core_surface(
         config=AFSConfig(
             general=GeneralConfig(
                 context_root=context_root,
-                agent_workspaces_dir=context_root / "workspaces",
             ),
             extensions=ExtensionsConfig(
                 enabled_extensions=["ext_workspace"],
@@ -1981,7 +2120,7 @@ def test_extension_mcp_server_conflicts_do_not_override_core_surface(
 
     registry = build_mcp_registry(manager)
     errors = registry.load_errors
-    assert any("Tool 'fs.read' already registered by core" in message for message in errors.values())
+    assert any("Tool 'context.read' already registered by core" in message for message in errors.values())
     assert any(
         "Resource 'afs://contexts' already registered by core" in message
         for message in errors.values()
@@ -2050,7 +2189,6 @@ def test_profile_mcp_tools_modules_are_loaded_into_registry(
         config=AFSConfig(
             general=GeneralConfig(
                 context_root=context_root,
-                agent_workspaces_dir=context_root / "workspaces",
             ),
             profiles=ProfilesConfig(
                 active_profile="work",

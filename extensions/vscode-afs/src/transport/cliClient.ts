@@ -137,11 +137,12 @@ export class CliClient implements ITransportClient {
           removed: true,
         };
       }
+      case "context.read":
       case "fs.read": {
         const filePath = args.path as string;
         const parsed = this.parseMountPath(filePath);
         if (!parsed.relativePath) {
-          throw new Error("fs.read requires a file path under .context/<mount_type>/...");
+          throw new Error("context.read requires a file path under .context/<mount_type>/...");
         }
         const output = await this.exec([
           "fs",
@@ -153,15 +154,16 @@ export class CliClient implements ITransportClient {
         ]);
         return { path: filePath, content: output };
       }
+      case "context.write":
       case "fs.write": {
         const filePath = args.path as string;
         const content = args.content as string;
         if (typeof content !== "string") {
-          throw new Error("fs.write requires string content");
+          throw new Error("context.write requires string content");
         }
         const parsed = this.parseMountPath(filePath);
         if (!parsed.relativePath) {
-          throw new Error("fs.write requires a file path under .context/<mount_type>/...");
+          throw new Error("context.write requires a file path under .context/<mount_type>/...");
         }
         const cliArgs = [
           "fs",
@@ -178,6 +180,7 @@ export class CliClient implements ITransportClient {
         await this.exec(cliArgs);
         return { path: filePath, bytes: Buffer.byteLength(content, "utf-8") };
       }
+      case "context.list":
       case "fs.list": {
         const dirPath = args.path as string;
         const parsed = this.parseMountPath(dirPath);
@@ -203,9 +206,9 @@ export class CliClient implements ITransportClient {
       { name: "context.init", description: "Initialize context", inputSchema: {} },
       { name: "context.mount", description: "Mount a path into context", inputSchema: {} },
       { name: "context.unmount", description: "Unmount an alias from context", inputSchema: {} },
-      { name: "fs.read", description: "Read a file", inputSchema: {} },
-      { name: "fs.write", description: "Write a file", inputSchema: {} },
-      { name: "fs.list", description: "List files", inputSchema: {} },
+      { name: "context.read", description: "Read a context-scoped file", inputSchema: {} },
+      { name: "context.write", description: "Write a context-scoped file", inputSchema: {} },
+      { name: "context.list", description: "List context-scoped files", inputSchema: {} },
     ];
   }
 

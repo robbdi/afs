@@ -113,11 +113,11 @@ def test_agent_config_sandbox_fields() -> None:
     ac = AgentConfig.from_dict({
         "name": "test",
         "allowed_mounts": ["scratchpad", "history"],
-        "allowed_tools": ["fs.read"],
+        "allowed_tools": ["context.read"],
         "workspace_isolated": True,
     })
     assert ac.allowed_mounts == ["scratchpad", "history"]
-    assert ac.allowed_tools == ["fs.read"]
+    assert ac.allowed_tools == ["context.read"]
     assert ac.workspace_isolated is True
 
 
@@ -145,7 +145,6 @@ def test_context_fs_enforces_allowed_mounts_for_reads(tmp_path: Path, monkeypatc
     context_root = tmp_path / ".context"
     general = GeneralConfig(
         context_root=tmp_path / "context-root",
-        agent_workspaces_dir=tmp_path / "context-root" / "workspaces",
     )
     manager = AFSManager(config=AFSConfig(general=general))
     project_path = tmp_path / "project"
@@ -167,7 +166,6 @@ def test_mcp_tool_scope_enforces_allowed_tools(tmp_path: Path, monkeypatch) -> N
     context_root = tmp_path / "context"
     general = GeneralConfig(
         context_root=context_root,
-        agent_workspaces_dir=context_root / "workspaces",
     )
     manager = AFSManager(config=AFSConfig(general=general))
     project_path = tmp_path / "project"

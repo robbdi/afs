@@ -62,8 +62,6 @@ def _expand_config_paths(config_data: dict[str, Any]) -> None:
         general = config_data["general"]
         if "context_root" in general:
             general["context_root"] = _expand_path(general["context_root"])
-        if "agent_workspaces_dir" in general:
-            general["agent_workspaces_dir"] = _expand_path(general["agent_workspaces_dir"])
         if "mcp_allowed_roots" in general and isinstance(general["mcp_allowed_roots"], list):
             general["mcp_allowed_roots"] = [
                 _expand_path(path)

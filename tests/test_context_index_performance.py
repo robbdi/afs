@@ -16,7 +16,6 @@ def _make_manager(tmp_path: Path) -> AFSManager:
     (context_root / "scratchpad").mkdir()
     general = GeneralConfig(
         context_root=context_root,
-        agent_workspaces_dir=context_root / "workspaces",
     )
     return AFSManager(config=AFSConfig(general=general))
 

@@ -20,11 +20,10 @@ class MountType(str, Enum):
     HIVEMIND = "hivemind"
     GLOBAL = "global"
     ITEMS = "items"
-    MONOREPO = "monorepo"
 
 
 # Mount types that are not required for context validation.
-OPTIONAL_MOUNT_TYPES: frozenset[MountType] = frozenset({MountType.MONOREPO})
+OPTIONAL_MOUNT_TYPES: frozenset[MountType] = frozenset({MountType.ITEMS})
 
 
 @dataclass(frozen=True)

@@ -18,7 +18,6 @@ def _make_manager(tmp_path: Path) -> AFSManager:
     context_root = tmp_path / "context"
     general = GeneralConfig(
         context_root=context_root,
-        agent_workspaces_dir=context_root / "workspaces",
     )
     return AFSManager(config=AFSConfig(general=general))
 
@@ -134,7 +133,6 @@ def test_context_health_reports_broken_and_profile_mount_issues(
     context_root = tmp_path / "context"
     general = GeneralConfig(
         context_root=context_root,
-        agent_workspaces_dir=context_root / "workspaces",
     )
     profiles = ProfilesConfig(
         active_profile="work",
@@ -185,7 +183,6 @@ def test_repair_context_seeds_provenance_and_remaps_missing_mount(
         config=AFSConfig(
             general=GeneralConfig(
                 context_root=context_root,
-                agent_workspaces_dir=context_root / "workspaces",
                 workspace_directories=[WorkspaceDirectory(path=workspace_root)],
             )
         )

@@ -50,7 +50,8 @@ Primary modules:
 ### 4. Interface Layer
 
 - CLI (`afs`) for context, profile, workspace, skills, embeddings, health.
-- MCP server for structured tool access (`fs.read`, `fs.write`, etc).
+- MCP server for structured tool access (`context.read`, `context.write`, and
+  compatibility aliases like `fs.read`/`fs.write`).
 - Extension-provided MCP tools can be registered from manifests.
 
 Primary modules:

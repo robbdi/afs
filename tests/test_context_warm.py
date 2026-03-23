@@ -13,7 +13,6 @@ def _build_config(tmp_path: Path) -> AFSConfig:
     return AFSConfig(
         general=GeneralConfig(
             context_root=context_root,
-            agent_workspaces_dir=context_root / "workspaces",
         ),
         profiles=ProfilesConfig(
             active_profile="work",

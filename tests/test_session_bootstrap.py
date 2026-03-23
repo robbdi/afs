@@ -40,7 +40,6 @@ def test_session_bootstrap_command_outputs_json_and_writes_artifacts(
     config = AFSConfig(
         general=GeneralConfig(
             context_root=context_root,
-            agent_workspaces_dir=context_root / "workspaces",
         ),
         directories=_remap_directories(
             scratchpad="notes",
@@ -112,7 +111,6 @@ def test_build_session_bootstrap_does_not_mutate_hivemind_or_memory(
     config = AFSConfig(
         general=GeneralConfig(
             context_root=context_root,
-            agent_workspaces_dir=context_root / "workspaces",
         )
     )
     manager = AFSManager(config=config)

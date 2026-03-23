@@ -132,11 +132,6 @@ def render_default_help(parser: argparse.ArgumentParser, config: AFSConfig | Non
         _format_kv(
             [
                 ("context_root", _format_path(context_root), _path_status(context_root)),
-                (
-                    "agent_workspaces_dir",
-                    _format_path(general.agent_workspaces_dir),
-                    _path_status(general.agent_workspaces_dir),
-                ),
                 ("workspace_root", _format_path(workspace_root), _path_status(workspace_root)),
                 ("workspaces", str(len(workspaces)), ""),
                 ("discovery_ignore", ", ".join(general.discovery_ignore), ""),

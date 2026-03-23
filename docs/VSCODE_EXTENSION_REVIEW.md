@@ -15,7 +15,7 @@ Use this checklist for incoming AFS VSCode extension changes (Antigravity/Cursor
    - Any MCP schema change in core AFS includes matching extension updates in the same PR (or linked PR).
 2. Context safety:
    - No direct filesystem traversal outside AFS-allowed roots for context injection.
-   - Context writes flow through supported MCP tools where possible (`fs.write`, `fs.move`, `fs.delete`).
+   - Context writes flow through supported MCP tools where possible (`context.write`, `context.move`, `context.delete`, with `fs.*` aliases only for compatibility).
 3. Reliability:
    - Explicit timeout, retry, and error handling for MCP server startup and reconnects.
    - User-facing errors include actionable remediation (missing command, bad path, auth failure).

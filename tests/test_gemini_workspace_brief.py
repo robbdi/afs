@@ -33,7 +33,6 @@ def test_gemini_workspace_brief_writes_outputs(tmp_path: Path, monkeypatch) -> N
     config = AFSConfig(
         general=GeneralConfig(
             context_root=tmp_path / "context",
-            agent_workspaces_dir=(tmp_path / "context" / "workspaces"),
             workspace_directories=[WorkspaceDirectory(path=workspace_root)],
         )
     )

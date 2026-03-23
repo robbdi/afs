@@ -29,6 +29,7 @@ htmlcov/
 
 # Project Specific
 .context/
+.claude/
 .quality-gates/
 llama.cpp/
 merge_temp.py

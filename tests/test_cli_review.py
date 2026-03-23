@@ -43,7 +43,6 @@ def _make_manager(
 ) -> AFSManager:
     general = GeneralConfig(
         context_root=tmp_path / "global-context",
-        agent_workspaces_dir=(tmp_path / "global-context" / "workspaces"),
         workspace_directories=(
             [WorkspaceDirectory(path=workspace_root.resolve())]
             if workspace_root is not None

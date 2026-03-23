@@ -44,7 +44,13 @@ Run the MCP server for Gemini/other MCP clients:
 ./scripts/afs mcp serve
 # or, after installing the package into the active environment
 afs mcp serve
+# for Claude Desktop, prefer the direct venv module entrypoint
+/Users/scawful/src/lab/afs/.venv/bin/python -m afs.mcp_server
 ```
+
+For Claude Desktop MCP registration, prefer the direct Python module entrypoint
+over the shell wrapper. See `docs/MCP_SERVER.md` for the recommended config and
+for the `initialize` timeout troubleshooting sequence.
 
 ## Gemini Integration
 
@@ -131,7 +137,6 @@ Use these first when bringing up AFS on a new machine or workspace:
 
 ```bash
 ./scripts/afs session bootstrap --json
-./scripts/afs session pack "current task" --model gemini --json
 ./scripts/afs doctor
 ./scripts/afs health
 ./scripts/afs services status --system
@@ -141,9 +146,15 @@ Use these first when bringing up AFS on a new machine or workspace:
 missing required mount directories, untracked/stale mount provenance, and stale
 context indexes.
 
-`afs session pack` is the compact, token-budgeted follow-on surface for
-Gemini, Claude, Codex, or generic clients. It writes model-specific pack
-artifacts under `.context/scratchpad/afs_agents/`.
+`afs session pack` is the explicit, token-budgeted follow-on surface for
+Gemini, Claude, Codex, or generic clients when you intentionally need a
+handoff/export packet. Repeated calls with the same bootstrap snapshot and
+pack inputs reuse the stored `session_pack_<model>` artifact instead of
+rebuilding from scratch.
+
+```bash
+./scripts/afs session pack "current task" --model gemini --json
+```
 
 ## Training Integrations
 

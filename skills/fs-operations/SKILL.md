@@ -16,6 +16,10 @@ requires:
 
 Read, write, and list files across AFS context mounts.
 
+For MCP clients, prefer `context.read`, `context.write`, `context.list`,
+`context.move`, and `context.delete`. The older `fs.*` tool names remain
+compatibility aliases. The CLI still uses `afs fs ...`.
+
 ## Commands
 
 | Command | Description |
@@ -40,14 +44,16 @@ Read, write, and list files across AFS context mounts.
 
 ## MCP Tools
 
-- `fs.list` — list files: `{"mount": "knowledge"}`
-- `fs.read` — read file: `{"mount": "memory", "path": "notes.md"}`
-- `fs.write` — write file: `{"mount": "scratchpad", "path": "draft.md", "content": "..."}`
-- `fs.delete` — delete file: `{"mount": "scratchpad", "path": "old.md"}`
-- `fs.move` — move file: `{"mount": "scratchpad", "from": "a.md", "to": "b.md"}`
+- `context.list` — list files: `{"path": "/path/to/project/.context/knowledge", "max_depth": 2}`
+- `context.read` — read file: `{"path": "/path/to/project/.context/memory/notes.md"}`
+- `context.write` — write file: `{"path": "/path/to/project/.context/scratchpad/draft.md", "content": "...", "mkdirs": true}`
+- `context.delete` — delete file: `{"path": "/path/to/project/.context/scratchpad/old.md"}`
+- `context.move` — move file: `{"source": "/path/to/project/.context/scratchpad/a.md", "destination": "/path/to/project/.context/scratchpad/b.md"}`
 
 ## Tips
 
 - `--relative` flag on `fs list` scopes to a subdirectory
 - All mounts are readable; only scratchpad/hivemind/items/global are writable
 - Sandbox agents can only write to their `allowed_mounts`
+- For MCP file tools, prefer absolute paths under the repo-local `.context`
+  root instead of mount-relative JSON arguments

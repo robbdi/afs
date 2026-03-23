@@ -759,6 +759,7 @@ def session_bootstrap_command(args: argparse.Namespace) -> int:
         context_path,
         task_limit=args.task_limit,
         message_limit=args.message_limit,
+        agent_name=getattr(args, "agent_name", "cli") or "cli",
     )
     if not args.no_write_artifacts:
         summary["artifact_paths"] = write_session_bootstrap_artifacts(
@@ -800,7 +801,7 @@ def session_pack_command(args: argparse.Namespace) -> int:
         max_query_results=args.max_query_results,
         max_embedding_results=args.max_embedding_results,
     )
-    if not args.no_write_artifacts:
+    if not args.no_write_artifacts and not bool((pack.get("cache") or {}).get("hit")):
         pack["artifact_paths"] = write_context_pack_artifacts(
             manager,
             context_path,
@@ -1524,6 +1525,10 @@ def register_parsers(subparsers: argparse._SubParsersAction) -> None:
         type=int,
         default=10,
         help="Maximum hivemind messages to include.",
+    )
+    session_bootstrap.add_argument(
+        "--agent-name",
+        help="Agent name for registration (default: cli).",
     )
     session_bootstrap.add_argument(
         "--no-write-artifacts",

@@ -8,8 +8,11 @@ import { createTransport, type BinaryInfo } from "./transport/clientFactory";
 import type { ITransportClient } from "./transport/types";
 import { locateAfsBinary } from "./utils/binaryLocator";
 import { createLogger } from "./utils/logger";
+import { AfsCommandTreeProvider } from "./views/commandTreeProvider";
 import { ContextTreeProvider } from "./views/contextTreeProvider";
+import { AfsDashboardProvider } from "./views/dashboardProvider";
 import { AfsStatusBar } from "./views/statusBar";
+import { AfsTrainingProvider } from "./views/trainingProvider";
 
 let client: ITransportClient | undefined;
 
@@ -52,6 +55,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   transport.onConnectionStateChanged((state) => statusBar.update(state));
   statusBar.update(transport.isReady() ? "connected" : "disconnected");
 
+  // --- Context Explorer (tree view) ---
   const treeProvider = new ContextTreeProvider(
     contextService,
     fileService,
@@ -59,6 +63,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider(TREE_VIEW_ID, treeProvider),
+  );
+
+  // --- Dashboard (webview) ---
+  const dashboardProvider = new AfsDashboardProvider(transport, logger);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      AfsDashboardProvider.viewType,
+      dashboardProvider,
+    ),
+  );
+
+  // --- Training (webview) ---
+  const trainingProvider = new AfsTrainingProvider(transport, logger);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      AfsTrainingProvider.viewType,
+      trainingProvider,
+    ),
+  );
+
+  // --- Commands (tree view) ---
+  const commandTreeProvider = new AfsCommandTreeProvider();
+  context.subscriptions.push(
+    vscode.window.registerTreeDataProvider("afs.commands", commandTreeProvider),
   );
 
   registerCommands(context, {
@@ -70,6 +98,43 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     binaryInfo,
     logger,
   });
+
+  // Dashboard & training refresh commands
+  context.subscriptions.push(
+    vscode.commands.registerCommand("afs.dashboard.refresh", () => {
+      dashboardProvider.refresh();
+    }),
+    vscode.commands.registerCommand("afs.training.refresh", () => {
+      trainingProvider.refresh();
+    }),
+    vscode.commands.registerCommand("afs.commands.refresh", () => {
+      commandTreeProvider.refresh();
+    }),
+  );
+
+  // Training action commands (invoke CLI via terminal)
+  context.subscriptions.push(
+    vscode.commands.registerCommand("afs.training.freshnessGate", () => {
+      const terminal = vscode.window.createTerminal("AFS Training");
+      terminal.show();
+      terminal.sendText("afs training freshness-gate --warn-only");
+    }),
+    vscode.commands.registerCommand("afs.training.extractSessions", () => {
+      const terminal = vscode.window.createTerminal("AFS Training");
+      terminal.show();
+      terminal.sendText("afs training extract-sessions --json");
+    }),
+    vscode.commands.registerCommand("afs.training.generateRouter", () => {
+      const terminal = vscode.window.createTerminal("AFS Training");
+      terminal.show();
+      terminal.sendText("afs training generate-router-data --json");
+    }),
+    vscode.commands.registerCommand("afs.training.exportAntigravity", () => {
+      const terminal = vscode.window.createTerminal("AFS Training");
+      terminal.show();
+      terminal.sendText("afs training export-antigravity --json");
+    }),
+  );
 
   const watcher = vscode.workspace.createFileSystemWatcher(
     "**/.context/metadata.json",

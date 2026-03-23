@@ -1,0 +1,284 @@
+import * as vscode from "vscode";
+import type { ITransportClient } from "../transport/types";
+
+function parseToolJson(result: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
+  const content = result?.content;
+  if (!Array.isArray(content) || content.length === 0) {
+    return null;
+  }
+  const first = content[0];
+  if (!first || typeof first !== "object") {
+    return null;
+  }
+  const text = Reflect.get(first, "text");
+  if (typeof text !== "string" || !text.trim()) {
+    return null;
+  }
+  const parsed = JSON.parse(text);
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+    ? (parsed as Record<string, unknown>)
+    : null;
+}
+
+export class AfsDashboardProvider implements vscode.WebviewViewProvider {
+  public static readonly viewType = "afs.dashboard";
+
+  private view?: vscode.WebviewView;
+
+  constructor(
+    private readonly transport: ITransportClient,
+    private readonly logger: vscode.OutputChannel,
+  ) {}
+
+  resolveWebviewView(
+    webviewView: vscode.WebviewView,
+    _context: vscode.WebviewViewResolveContext,
+    _token: vscode.CancellationToken,
+  ): void {
+    this.view = webviewView;
+    webviewView.webview.options = { enableScripts: true };
+    webviewView.webview.onDidReceiveMessage(async (msg) => {
+      switch (msg.command) {
+        case "refresh":
+          await this.updateContent();
+          break;
+        case "rebuildIndex":
+          await vscode.commands.executeCommand("afs.index.rebuild");
+          await this.updateContent();
+          break;
+        case "mcpStatus":
+          await vscode.commands.executeCommand("afs.mcp.status");
+          break;
+        case "showLogs":
+          await vscode.commands.executeCommand("afs.server.showLogs");
+          break;
+        case "openCommand":
+          if (msg.id) {
+            await vscode.commands.executeCommand(msg.id);
+          }
+          break;
+      }
+    });
+    this.updateContent();
+  }
+
+  async refresh(): Promise<void> {
+    await this.updateContent();
+  }
+
+  private async updateContent(): Promise<void> {
+    if (!this.view) return;
+
+    const connected = this.transport.isReady();
+    const caps = this.transport.capabilities();
+
+    // Try to get context status via MCP
+    let contextStatus: Record<string, unknown> | null = null;
+    let freshnessData: Record<string, unknown> | null = null;
+    let antigravityStatus: Record<string, unknown> | null = null;
+
+    if (connected) {
+      try {
+        const statusResult = await this.transport.callTool("context.status", {});
+        const parsed = parseToolJson(statusResult);
+        if (parsed) {
+          contextStatus = parsed;
+        }
+      } catch {
+        // status tool may not exist
+      }
+
+      try {
+        const freshResult = await this.transport.callTool("context.freshness", {});
+        const parsed = parseToolJson(freshResult);
+        if (parsed) {
+          freshnessData = parsed;
+        }
+      } catch {
+        // freshness tool may not exist
+      }
+
+      try {
+        const agResult = await this.transport.callTool("training.antigravity.status", {});
+        const parsed = parseToolJson(agResult);
+        if (parsed) {
+          antigravityStatus = parsed;
+        }
+      } catch {
+        // antigravity tool may not exist
+      }
+    }
+
+    this.view.webview.html = this.buildHtml(
+      connected,
+      caps,
+      contextStatus,
+      freshnessData,
+      antigravityStatus,
+    );
+  }
+
+  private buildHtml(
+    connected: boolean,
+    caps: { tools: boolean; resources: boolean; prompts: boolean },
+    contextStatus: Record<string, unknown> | null,
+    freshnessData: Record<string, unknown> | null,
+    antigravityStatus: Record<string, unknown> | null,
+  ): string {
+    const statusIcon = connected ? "\u2713" : "\u2717";
+    const statusClass = connected ? "connected" : "disconnected";
+    const statusLabel = connected ? "Connected" : "Disconnected";
+
+    const capsList = [
+      caps.tools ? "tools" : null,
+      caps.resources ? "resources" : null,
+      caps.prompts ? "prompts" : null,
+    ]
+      .filter(Boolean)
+      .join(", ") || "none";
+
+    let contextHtml = "";
+    if (contextStatus) {
+      const project = (contextStatus as any).project ?? "unknown";
+      const mounts = (contextStatus as any).total_mounts ?? 0;
+      contextHtml = `
+        <div class="section">
+          <h3>Context</h3>
+          <div class="row"><span class="label">Project</span><span class="value">${this.esc(project)}</span></div>
+          <div class="row"><span class="label">Mounts</span><span class="value">${mounts}</span></div>
+        </div>`;
+    }
+
+    let freshnessHtml = "";
+    if (freshnessData) {
+      const scores = (freshnessData as any).mount_scores ?? {};
+      const rows = Object.entries(scores)
+        .map(([mount, score]) => {
+          const s = typeof score === "number" ? score : 0;
+          const cls = s >= 0.5 ? "fresh" : s >= 0.3 ? "stale" : "critical";
+          return `<div class="row"><span class="label">${this.esc(mount)}</span><span class="value ${cls}">${(s * 100).toFixed(0)}%</span></div>`;
+        })
+        .join("");
+      if (rows) {
+        freshnessHtml = `
+          <div class="section">
+            <h3>Freshness</h3>
+            ${rows}
+          </div>`;
+      }
+    }
+
+    let antigravityHtml = "";
+    if (antigravityStatus) {
+      const count = (antigravityStatus as any).trajectory_count ?? 0;
+      const lastSync = (antigravityStatus as any).last_sync ?? "unknown";
+      antigravityHtml = `
+        <div class="section">
+          <h3>Antigravity</h3>
+          <div class="row"><span class="label">Trajectories</span><span class="value">${count}</span></div>
+          <div class="row"><span class="label">Last Sync</span><span class="value">${this.esc(String(lastSync))}</span></div>
+        </div>`;
+    }
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body {
+    font-family: var(--vscode-font-family);
+    font-size: var(--vscode-font-size);
+    color: var(--vscode-foreground);
+    padding: 8px;
+    margin: 0;
+  }
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+  }
+  .header h2 { margin: 0; font-size: 13px; font-weight: 600; }
+  .status { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+  .status .icon { font-size: 14px; }
+  .connected .icon { color: var(--vscode-testing-iconPassed); }
+  .disconnected .icon { color: var(--vscode-testing-iconFailed); }
+  .section { margin-bottom: 12px; }
+  .section h3 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--vscode-descriptionForeground);
+    margin: 0 0 6px 0;
+  }
+  .row {
+    display: flex;
+    justify-content: space-between;
+    padding: 2px 0;
+    font-size: 12px;
+  }
+  .label { color: var(--vscode-descriptionForeground); }
+  .value { font-weight: 500; }
+  .value.fresh { color: var(--vscode-testing-iconPassed); }
+  .value.stale { color: var(--vscode-editorWarning-foreground); }
+  .value.critical { color: var(--vscode-testing-iconFailed); }
+  .actions {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 12px;
+  }
+  button {
+    background: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+    border: none;
+    padding: 4px 8px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: var(--vscode-font-family);
+    text-align: left;
+  }
+  button:hover {
+    background: var(--vscode-button-secondaryHoverBackground);
+  }
+</style>
+</head>
+<body>
+  <div class="header">
+    <h2>AFS</h2>
+    <div class="status ${statusClass}">
+      <span class="icon">${statusIcon}</span>
+      <span>${statusLabel}</span>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>Server</h3>
+    <div class="row"><span class="label">Capabilities</span><span class="value">${capsList}</span></div>
+  </div>
+
+  ${contextHtml}
+  ${freshnessHtml}
+  ${antigravityHtml}
+
+  <div class="actions">
+    <button onclick="post('refresh')">Refresh</button>
+    <button onclick="post('rebuildIndex')">Rebuild Index</button>
+    <button onclick="post('showLogs')">Show Logs</button>
+  </div>
+
+  <script>
+    const vscode = acquireVsCodeApi();
+    function post(cmd, data) {
+      vscode.postMessage({ command: cmd, ...data });
+    }
+  </script>
+</body>
+</html>`;
+  }
+
+  private esc(s: string): string {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+}

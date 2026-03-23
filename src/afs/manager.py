@@ -693,6 +693,25 @@ class AFSManager:
         self._write_metadata(metadata_path, metadata)
         return metadata
 
+    def register_agent(
+        self,
+        agent_name: str,
+        context_path: Path | None = None,
+    ) -> ProjectMetadata:
+        """Register an agent in the project metadata."""
+        if context_path is None:
+            context_path = Path(".") / self.CONTEXT_DIR_DEFAULT
+
+        metadata_path = context_path / self.METADATA_FILE
+        if not metadata_path.exists():
+            return ProjectMetadata()
+
+        metadata = self._load_metadata(context_path) or ProjectMetadata()
+        if agent_name not in metadata.agents:
+            metadata.agents.append(agent_name)
+            self._write_metadata(metadata_path, metadata)
+        return metadata
+
     def protect(
         self,
         path_str: str,
@@ -1052,7 +1071,6 @@ class AFSManager:
             _add(workspace.path)
         for root in self.config.general.mcp_allowed_roots:
             _add(root)
-        _add(self.config.general.agent_workspaces_dir)
         _add(context_path.parent)
         return roots
 

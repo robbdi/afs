@@ -86,9 +86,6 @@ def _resolve_search_paths(
     for workspace in config.general.workspace_directories:
         _add_path(workspace.path)
 
-    if config.general.agent_workspaces_dir:
-        _add_path(config.general.agent_workspaces_dir)
-
     return resolved
 
 

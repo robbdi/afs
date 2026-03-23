@@ -15,7 +15,6 @@ from .grounding_hooks import run_grounding_hooks
 from .history import log_event
 from .manager import AFSManager
 from .models import MountType
-from .monorepo_bridge import get_workspace_bridge_status
 from .policy import PolicyEnforcer
 
 logger = logging.getLogger(__name__)
@@ -71,7 +70,6 @@ class ContextFileSystem:
         if not self._context_path.exists():
             raise FileNotFoundError(f"No AFS context at {self._context_path}")
         self._policy = PolicyEnforcer(manager.config.directories)
-        self._stale_bridge_warning_mtime: float | None = None
 
     @property
     def context_path(self) -> Path:
@@ -117,7 +115,6 @@ class ContextFileSystem:
         errors: str = "replace",
     ) -> str:
         self._ensure_mount_access(mount_type, operation="read")
-        self._warn_if_workspace_bridge_stale()
         run_grounding_hooks(
             event="before_context_read",
             payload={
@@ -148,31 +145,6 @@ class ContextFileSystem:
             include_payloads=False,
         )
         return content
-
-    def _warn_if_workspace_bridge_stale(self) -> None:
-        status = get_workspace_bridge_status(
-            self._context_path,
-            manager=self._manager,
-        )
-        if not status.exists or not status.stale:
-            self._stale_bridge_warning_mtime = None
-            return
-
-        try:
-            mtime = status.path.stat().st_mtime
-        except OSError:
-            mtime = None
-        if mtime is not None and self._stale_bridge_warning_mtime == mtime:
-            return
-        if mtime is not None:
-            self._stale_bridge_warning_mtime = mtime
-
-        age = int(status.age_seconds) if status.age_seconds is not None else -1
-        logger.warning(
-            "AFS monorepo bridge is stale: %s (age=%ss > 3600s)",
-            status.path,
-            age,
-        )
 
     def write_text(
         self,

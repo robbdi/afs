@@ -74,7 +74,6 @@ def _make_config(tmp_path: Path) -> AFSConfig:
     return AFSConfig(
         general=GeneralConfig(
             context_root=tmp_path / "context",
-            agent_workspaces_dir=tmp_path / "context" / "workspaces",
         ),
         extensions=ExtensionsConfig(
             auto_discover=False,
@@ -204,7 +203,6 @@ def test_pack_bundle_dereferences_symlinked_mount_content(tmp_path: Path) -> Non
     config = AFSConfig(
         general=GeneralConfig(
             context_root=tmp_path / "context",
-            agent_workspaces_dir=tmp_path / "context" / "workspaces",
         ),
         extensions=ExtensionsConfig(
             auto_discover=False,

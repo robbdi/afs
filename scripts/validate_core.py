@@ -127,11 +127,21 @@ def check_mcp_server() -> list[str]:
             registry,
         )
         tools = resp["result"]["tools"]
-        expected_core_tools = {"fs.read", "fs.write", "fs.list", "context.discover", "context.mount"}
+        expected_core_tools = {
+            "context.read",
+            "context.write",
+            "context.list",
+            "context.discover",
+            "context.mount",
+        }
+        expected_alias_tools = {"fs.read", "fs.write", "fs.list"}
         actual_names = {t["name"] for t in tools}
         missing = expected_core_tools - actual_names
         if missing:
             errors.append(f"FAIL: MCP missing core tools: {missing}")
+        missing_aliases = expected_alias_tools - actual_names
+        if missing_aliases:
+            errors.append(f"FAIL: MCP missing compatibility aliases: {missing_aliases}")
 
         # Check initialize
         resp = _handle_request(

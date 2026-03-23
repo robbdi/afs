@@ -110,7 +110,6 @@ def test_collect_afs_health_uses_remapped_history_and_scratchpad(
     config = AFSConfig(
         general=GeneralConfig(
             context_root=context_root,
-            agent_workspaces_dir=context_root / "workspaces",
         ),
         directories=_remap_directories(history="ledger", scratchpad="notes"),
     )

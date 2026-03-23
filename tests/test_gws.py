@@ -3,15 +3,18 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from afs.gws import GWSClient
+from afs.gws_policy import GWSPolicyConfig
 
 
 class _FakeClient(GWSClient):
     def __init__(self, stdout: str, *, returncode: int = 0) -> None:
-        self._binary = "gws"
+        # Disable policy enforcement in existing unit tests so they
+        # continue to test the JSON-parsing logic in isolation.
+        super().__init__(binary="gws", policy_config=GWSPolicyConfig(enabled=False))
         self._stdout = stdout
         self._returncode = returncode
 
-    def _run(self, args: list[str], timeout: int = 15):
+    def _run(self, args: list[str], timeout: int = 15, *, _skip_policy: bool = False):
         return SimpleNamespace(returncode=self._returncode, stdout=self._stdout)
 
 

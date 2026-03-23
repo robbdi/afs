@@ -221,7 +221,6 @@ def test_write_config_round_trips_extended_sections(tmp_path) -> None:
         {
             "general": {
                 "context_root": str(tmp_path / "context"),
-                "agent_workspaces_dir": str(tmp_path / "context" / "workspaces"),
                 "python_executable": str(tmp_path / "venv" / "bin" / "python"),
                 "workspace_directories": [
                     {"path": str(tmp_path / "workspace"), "description": "Lab"}
