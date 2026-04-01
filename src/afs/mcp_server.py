@@ -1,4 +1,10 @@
-"""Lightweight MCP server exposing AFS context operations over stdio."""
+"""Lightweight MCP server exposing AFS context operations over stdio.
+
+NOTE: Registry types, transport functions, and protocol constants have
+been extracted to ``afs.mcp``.  This module re-imports them so that
+existing callers (``from afs.mcp_server import MCPToolRegistry``) keep
+working.  New code should import directly from ``afs.mcp``.
+"""
 
 from __future__ import annotations
 
@@ -27,6 +33,31 @@ from .context_paths import resolve_mount_root
 from .discovery import discover_contexts
 from .event_log import read_agent_events
 from .manager import AFSManager
+from .mcp.registry import (
+    CORE_PROMPT_NAMES as _CORE_PROMPT_NAMES_NEW,
+    CORE_RESOURCE_PREFIXES as _CORE_RESOURCE_PREFIXES_BASE,
+    CORE_RESOURCE_URIS as _CORE_RESOURCE_URIS,
+    ExtensionMCPStatus,
+    MCPExtensionContribution,
+    MCPPromptDefinition,
+    MCPResourceDefinition,
+    MCPToolDefinition,
+    MCPToolRegistry,
+    PromptHandler,
+    ResourceHandler,
+    ToolHandler,
+)
+from .mcp.transport import (
+    LEGACY_PROTOCOL_VERSION,
+    PROTOCOL_VERSION,
+    SERVER_NAME,
+    SERVER_VERSION,
+    SUPPORTED_PROTOCOL_VERSIONS,
+    error_response as _error_response_fn,
+    read_message as _read_message_fn,
+    success_response as _success_response_fn,
+    write_message as _write_message_fn,
+)
 from .models import MountType
 from .operator_digests import KIND_CHOICES, digest_operator_output
 from .plugins import load_enabled_extensions
@@ -46,295 +77,20 @@ from .session_bootstrap import (
     render_session_bootstrap,
 )
 
-SERVER_NAME = "afs"
-SERVER_VERSION = "0.1.0"
-PROTOCOL_VERSION = "2025-06-18"
-LEGACY_PROTOCOL_VERSION = "2024-11-05"
-SUPPORTED_PROTOCOL_VERSIONS = (PROTOCOL_VERSION, LEGACY_PROTOCOL_VERSION)
-_CORE_RESOURCE_URIS = {"afs://contexts", "afs://claude/bootstrap"}
-_CORE_RESOURCE_PREFIXES = ("afs://context/", SCHEMA_URI_PREFIX)
-_CORE_PROMPT_NAMES = {
-    "afs.context.overview",
-    "afs.query.search",
-    "afs.session.bootstrap",
-    "afs.session.pack",
-    "afs.scratchpad.review",
-    "afs.workflow.structured",
-}
-
-ToolHandler = Callable[[dict[str, Any], AFSManager], dict[str, Any]]
-ResourceHandler = Callable[..., dict[str, Any]]
-PromptHandler = Callable[..., list[dict[str, Any]]]
+# Extend core prefixes with schema URI prefix from response_schemas
+_CORE_RESOURCE_PREFIXES = (*_CORE_RESOURCE_PREFIXES_BASE, SCHEMA_URI_PREFIX)
+_CORE_PROMPT_NAMES = _CORE_PROMPT_NAMES_NEW
 
 
-@dataclass(frozen=True)
-class MCPToolDefinition:
-    name: str
-    description: str
-    input_schema: dict[str, Any]
-    handler: ToolHandler
-    source: str = "core"
+# --- Backward-compat aliases for classes/functions now in afs.mcp ---
+# MCPToolDefinition, MCPResourceDefinition, MCPPromptDefinition,
+# MCPExtensionContribution, ExtensionMCPStatus, MCPToolRegistry
+# are imported above from .mcp.registry.
 
-    def to_spec(self) -> dict[str, Any]:
-        return {
-            "name": self.name,
-            "description": self.description,
-            "inputSchema": self.input_schema,
-        }
-
-
-@dataclass(frozen=True)
-class MCPResourceDefinition:
-    uri: str
-    name: str
-    description: str
-    mime_type: str
-    handler: ResourceHandler
-    source: str = "core"
-
-    def to_spec(self) -> dict[str, Any]:
-        return {
-            "uri": self.uri,
-            "name": self.name,
-            "description": self.description,
-            "mimeType": self.mime_type,
-        }
-
-
-@dataclass(frozen=True)
-class MCPPromptDefinition:
-    name: str
-    description: str
-    arguments: list[dict[str, Any]]
-    handler: PromptHandler
-    source: str = "core"
-
-    def to_spec(self) -> dict[str, Any]:
-        return {
-            "name": self.name,
-            "description": self.description,
-            "arguments": list(self.arguments),
-        }
-
-
-@dataclass(frozen=True)
-class MCPExtensionContribution:
-    tools: list[MCPToolDefinition] = field(default_factory=list)
-    resources: list[MCPResourceDefinition] = field(default_factory=list)
-    prompts: list[MCPPromptDefinition] = field(default_factory=list)
-
-
-@dataclass
-class ExtensionMCPStatus:
-    extension: str
-    surface: str
-    module: str
-    factory: str
-    loaded_tools: list[str] = field(default_factory=list)
-    loaded_resources: list[str] = field(default_factory=list)
-    loaded_prompts: list[str] = field(default_factory=list)
-    error: str | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "extension": self.extension,
-            "surface": self.surface,
-            "module": self.module,
-            "factory": self.factory,
-            "loaded_tools": list(self.loaded_tools),
-            "loaded_resources": list(self.loaded_resources),
-            "loaded_prompts": list(self.loaded_prompts),
-            "error": self.error,
-        }
-
-
-@dataclass
-class MCPToolRegistry:
-    tools: dict[str, MCPToolDefinition] = field(default_factory=dict)
-    resources: dict[str, MCPResourceDefinition] = field(default_factory=dict)
-    prompts: dict[str, MCPPromptDefinition] = field(default_factory=dict)
-    extension_status: list[ExtensionMCPStatus] = field(default_factory=list)
-    load_errors: dict[str, str] = field(default_factory=dict)
-
-    def add_tool(self, tool: MCPToolDefinition) -> None:
-        if tool.name in self.tools:
-            existing = self.tools[tool.name]
-            raise ValueError(
-                f"Tool '{tool.name}' already registered by {existing.source}; "
-                f"cannot override from {tool.source}"
-            )
-        self.tools[tool.name] = tool
-
-    def add_resource(self, resource: MCPResourceDefinition) -> None:
-        if resource.uri in _CORE_RESOURCE_URIS or any(
-            resource.uri.startswith(prefix) for prefix in _CORE_RESOURCE_PREFIXES
-        ):
-            raise ValueError(
-                f"Resource '{resource.uri}' already registered by core; "
-                f"cannot override from {resource.source}"
-            )
-        if resource.uri in self.resources:
-            existing = self.resources[resource.uri]
-            raise ValueError(
-                f"Resource '{resource.uri}' already registered by {existing.source}; "
-                f"cannot override from {resource.source}"
-            )
-        self.resources[resource.uri] = resource
-
-    def add_prompt(self, prompt: MCPPromptDefinition) -> None:
-        if prompt.name in _CORE_PROMPT_NAMES:
-            raise ValueError(
-                f"Prompt '{prompt.name}' already registered by core; "
-                f"cannot override from {prompt.source}"
-            )
-        if prompt.name in self.prompts:
-            existing = self.prompts[prompt.name]
-            raise ValueError(
-                f"Prompt '{prompt.name}' already registered by {existing.source}; "
-                f"cannot override from {prompt.source}"
-            )
-        self.prompts[prompt.name] = prompt
-
-    def specs(self) -> list[dict[str, Any]]:
-        return [self.tools[name].to_spec() for name in sorted(self.tools)]
-
-    def resource_specs(self) -> list[dict[str, Any]]:
-        return [self.resources[uri].to_spec() for uri in sorted(self.resources)]
-
-    def prompt_specs(self) -> list[dict[str, Any]]:
-        return [self.prompts[name].to_spec() for name in sorted(self.prompts)]
-
-    def call(
-        self,
-        name: str,
-        arguments: dict[str, Any],
-        manager: AFSManager,
-    ) -> dict[str, Any]:
-        import time
-
-        tool = self.tools.get(name)
-        if not tool:
-            raise ValueError(f"Unknown tool: {name}")
-        assert_tool_allowed(name)
-        start = time.monotonic()
-        try:
-            result = tool.handler(arguments, manager)
-        except Exception as exc:
-            elapsed_ms = int((time.monotonic() - start) * 1000)
-            try:
-                from .history import log_mcp_tool_call
-
-                log_mcp_tool_call(
-                    name,
-                    arguments,
-                    {"error": str(exc)},
-                    duration_ms=elapsed_ms,
-                    context_root=manager.config.general.context_root,
-                )
-            except Exception:
-                pass
-            raise
-        elapsed_ms = int((time.monotonic() - start) * 1000)
-        try:
-            from .history import log_mcp_tool_call
-            log_mcp_tool_call(
-                name,
-                arguments,
-                result,
-                duration_ms=elapsed_ms,
-                context_root=manager.config.general.context_root,
-            )
-        except Exception:
-            pass
-        return result
-
-    def read_resource(self, uri: str, manager: AFSManager) -> dict[str, Any]:
-        resource = self.resources.get(uri)
-        if not resource:
-            raise ValueError(f"Unknown resource URI: {uri}")
-        return resource.handler(uri, manager)
-
-    def get_prompt(
-        self,
-        name: str,
-        arguments: dict[str, Any],
-        manager: AFSManager,
-    ) -> list[dict[str, Any]]:
-        prompt = self.prompts.get(name)
-        if not prompt:
-            raise ValueError(f"Unknown prompt: {name}")
-        return prompt.handler(arguments, manager)
-
-
-def _read_message(stream) -> tuple[dict[str, Any] | None, str | None]:
-    first = stream.read(1)
-    while first in (b"\r", b"\n"):
-        first = stream.read(1)
-    if first == b"":
-        return None, None
-
-    if first in (b"{", b"["):
-        line = first + stream.readline()
-        return json.loads(line.decode("utf-8")), "jsonl"
-
-    headers: dict[str, str] = {}
-    header_bytes = bytearray(first)
-    while True:
-        chunk = stream.read(1)
-        if chunk == b"":
-            return None, None
-        header_bytes.extend(chunk)
-        if header_bytes.endswith(b"\r\n\r\n") or header_bytes.endswith(b"\n\n") or header_bytes.endswith(b"\r\r"):
-            break
-
-    header_text = (
-        header_bytes.decode("utf-8", errors="replace")
-        .replace("\r\n", "\n")
-        .replace("\r", "\n")
-    )
-    for line in header_text.split("\n"):
-        if not line.strip() or ":" not in line:
-            continue
-        key, value = line.split(":", 1)
-        headers[key.strip().lower()] = value.strip()
-
-    length_raw = headers.get("content-length")
-    if not length_raw:
-        return None, None
-    try:
-        length = int(length_raw)
-    except ValueError:
-        return None, None
-    body = bytearray()
-    while len(body) < length:
-        chunk = stream.read(length - len(body))
-        if chunk == b"":
-            return None, None
-        body.extend(chunk)
-    return json.loads(body.decode("utf-8")), "content-length"
-
-
-def _write_message(stream, payload: dict[str, Any], mode: str = "content-length") -> None:
-    raw = json.dumps(payload, ensure_ascii=True).encode("utf-8")
-    if mode == "jsonl":
-        stream.write(raw + b"\n")
-    else:
-        header = f"Content-Length: {len(raw)}\r\n\r\n".encode("ascii")
-        stream.write(header)
-        stream.write(raw)
-    stream.flush()
-
-
-def _error_response(request_id: Any, code: int, message: str) -> dict[str, Any]:
-    return {
-        "jsonrpc": "2.0",
-        "id": request_id,
-        "error": {"code": code, "message": message},
-    }
-
-
-def _success_response(request_id: Any, result: dict[str, Any]) -> dict[str, Any]:
-    return {"jsonrpc": "2.0", "id": request_id, "result": result}
+_read_message = _read_message_fn
+_write_message = _write_message_fn
+_error_response = _error_response_fn
+_success_response = _success_response_fn
 
 
 def _allowed_roots(manager: AFSManager) -> list[Path]:
@@ -3071,9 +2827,21 @@ def _load_profile_mcp_definitions(
 
 def build_mcp_registry(manager: AFSManager) -> MCPToolRegistry:
     """Build MCP registry including extension tools, resources, and prompts."""
+    from .mcp.hooks import SENSITIVITY_TOOL_NAMES, sensitivity_pre_hook
+
     registry = MCPToolRegistry()
 
     for tool in _builtin_tool_definitions():
+        # Apply sensitivity pre-hook to filesystem/context tools
+        if tool.name in SENSITIVITY_TOOL_NAMES:
+            tool = MCPToolDefinition(
+                name=tool.name,
+                description=tool.description,
+                input_schema=tool.input_schema,
+                handler=tool.handler,
+                source=tool.source,
+                pre_hook=sensitivity_pre_hook,
+            )
         registry.add_tool(tool)
 
     extension_contribution, statuses = _load_extension_mcp_definitions(manager)

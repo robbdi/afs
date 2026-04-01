@@ -18,6 +18,26 @@ _MAX_TEXT_CHARS = 1500
 _MAX_LIST_ITEMS = 8
 
 
+def _estimate_tokens(text: str) -> int:
+    """Approximate token count cheaply for bootstrap budgeting."""
+    if not text or not text.strip():
+        return 0
+    return max(1, (len(text) + 3) // 4)
+
+# Priority ordering for token budgeting (highest priority first).
+# Sections at the top survive truncation; sections at the bottom are
+# dropped first when the bootstrap exceeds the token budget.
+_SECTION_PRIORITY = [
+    "handoff",       # critical: what happened last session
+    "scratchpad",    # high: current working state
+    "tasks",         # high: pending work items
+    "diff",          # medium: recent changes
+    "memory",        # medium: durable context
+    "hivemind",      # low: cross-agent messages
+    "agent_reports", # low: background agent status
+]
+
+
 def collect_context_status(manager: AFSManager, context_path: Path) -> dict[str, Any]:
     """Return the same context status summary used by MCP and session bootstrap."""
     context_path = context_path.expanduser().resolve()
@@ -123,8 +143,16 @@ def build_session_bootstrap(
     message_limit: int = 10,
     agent_name: str = "cli",
     record_event: bool = True,
+    token_budget: int = 0,
 ) -> dict[str, Any]:
-    """Build a structured startup packet for a context-aware agent session."""
+    """Build a structured startup packet for a context-aware agent session.
+
+    When *token_budget* > 0, sections are truncated from lowest priority
+    first until the rendered bootstrap fits within the budget.  Priority
+    ordering (highest first): handoff, scratchpad, tasks, diff, memory,
+    hivemind, agent_reports.  The status header and startup_sequence are
+    always included.
+    """
     context_path = context_path.expanduser().resolve()
     manager.register_agent(agent_name, context_path)
     context = manager.list_context(context_path=context_path)
@@ -174,6 +202,11 @@ def build_session_bootstrap(
         "stale_mounts": stale_mounts,
     }
     summary["recommended_actions"] = _build_recommendations(summary)
+
+    # Apply token budget truncation if requested
+    if token_budget > 0:
+        summary = _apply_token_budget(summary, token_budget)
+
     if record_event:
         try:
             from .history import log_session_event
@@ -184,6 +217,42 @@ def build_session_bootstrap(
             )
         except Exception:
             pass
+    return summary
+
+
+def _apply_token_budget(summary: dict[str, Any], budget: int) -> dict[str, Any]:
+    """Truncate low-priority sections until the summary fits within budget."""
+    rendered = json.dumps(summary, default=str)
+    current_tokens = _estimate_tokens(rendered)
+    if current_tokens <= budget:
+        return summary
+
+    # Record what was truncated for observability
+    truncated_sections: list[str] = []
+
+    # Walk sections from lowest priority to highest, replacing with stubs
+    for section_key in reversed(_SECTION_PRIORITY):
+        if current_tokens <= budget:
+            break
+        if section_key not in summary:
+            continue
+        section_data = summary[section_key]
+        # Skip sections that are already minimal
+        section_json = json.dumps(section_data, default=str)
+        section_tokens = _estimate_tokens(section_json)
+        if section_tokens < 20:
+            continue
+        summary[section_key] = {"truncated": True, "reason": "token_budget"}
+        truncated_sections.append(section_key)
+        rendered = json.dumps(summary, default=str)
+        current_tokens = _estimate_tokens(rendered)
+
+    if truncated_sections:
+        summary["_budget_info"] = {
+            "token_budget": budget,
+            "estimated_tokens": current_tokens,
+            "truncated_sections": truncated_sections,
+        }
     return summary
 
 
@@ -291,6 +360,13 @@ def render_session_bootstrap(summary: dict[str, Any]) -> str:
 
     lines.extend(["", "## Durable Memory"])
     lines.append(f"- entries_count: {memory['entries_count']}")
+    manifest = memory.get("memory_manifest", [])
+    if manifest:
+        lines.append(f"- topics ({len(manifest)}):")
+        for topic in manifest:
+            lines.append(
+                f"  - {topic['topic']}: {topic['entry_count']} entries, latest {topic['latest'][:10]}"
+            )
     if memory["latest_markdown_path"]:
         lines.append(f"- latest_summary: {memory['latest_markdown_path']}")
         if memory["latest_markdown_excerpt"]:
@@ -460,13 +536,23 @@ def _collect_memory(manager: AFSManager, context_path: Path) -> dict[str, Any]:
     entries_path = memory_root / manager.config.memory_consolidation.entries_filename
     summary_dir = memory_root / manager.config.memory_consolidation.summary_dir_name
     entries_count = 0
+    entries: list[dict[str, Any]] = []
     if entries_path.exists():
         try:
-            entries_count = sum(
-                1 for line in entries_path.read_text(encoding="utf-8").splitlines() if line.strip()
-            )
+            for line in entries_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                entries_count += 1
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
         except OSError:
             entries_count = 0
+
+    # Build memory manifest: unique topics from tags/domains, most recent first
+    manifest = _build_memory_manifest(entries)
 
     latest_markdown_path = None
     latest_markdown_excerpt = ""
@@ -485,10 +571,56 @@ def _collect_memory(manager: AFSManager, context_path: Path) -> dict[str, Any]:
         "entries_path": str(entries_path),
         "summary_dir": str(summary_dir),
         "entries_count": entries_count,
+        "memory_manifest": manifest,
         "latest_markdown_path": str(latest_markdown_path) if latest_markdown_path else "",
         "latest_markdown_excerpt": latest_markdown_excerpt,
         "status": pipeline_status,
     }
+
+
+_MAX_MANIFEST_TOPICS = 20
+
+
+def _build_memory_manifest(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Build a manifest of memory topics from entries, most recent first.
+
+    Scans entries for unique tags and domains, returning up to
+    _MAX_MANIFEST_TOPICS topics with entry counts and latest timestamps.
+    This allows agents to make targeted memory.search calls instead of
+    broad queries.
+    """
+    topic_stats: dict[str, dict[str, Any]] = {}
+
+    for entry in entries:
+        created_at = entry.get("created_at", "")
+        domain = entry.get("domain")
+        tags = entry.get("tags", [])
+
+        # Collect topic keys from domain and tags
+        topic_keys: list[str] = []
+        if isinstance(domain, str) and domain.strip():
+            topic_keys.append(f"domain:{domain.strip()}")
+        if isinstance(tags, list):
+            for tag in tags:
+                if isinstance(tag, str) and tag.strip():
+                    key = f"tag:{tag.strip()}"
+                    if key not in topic_keys:
+                        topic_keys.append(key)
+
+        for key in topic_keys:
+            if key not in topic_stats:
+                topic_stats[key] = {"topic": key, "entry_count": 0, "latest": ""}
+            topic_stats[key]["entry_count"] += 1
+            if isinstance(created_at, str) and created_at > topic_stats[key]["latest"]:
+                topic_stats[key]["latest"] = created_at
+
+    # Sort by latest timestamp descending, then by entry count descending
+    sorted_topics = sorted(
+        topic_stats.values(),
+        key=lambda t: (t["latest"], t["entry_count"]),
+        reverse=True,
+    )
+    return sorted_topics[:_MAX_MANIFEST_TOPICS]
 
 
 def _collect_agent_reports(manager: AFSManager, context_path: Path) -> dict[str, Any]:

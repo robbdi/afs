@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -20,12 +21,24 @@ ACTIVE_AGENT_STATES = {"running", "awaiting_review"}
 RECENT_AGENT_WINDOW = timedelta(hours=24)
 
 
+def _nearest_existing_parent(path: Path) -> Path:
+    current = path.expanduser().resolve()
+    while not current.exists() and current != current.parent:
+        current = current.parent
+    return current
+
+
 def agent_registry_path() -> Path:
     """Return the global registry path used by session briefings."""
     env_value = os.environ.get("AFS_AGENT_REGISTRY_PATH", "").strip()
     if env_value:
         return Path(env_value).expanduser().resolve()
-    return (Path.home() / ".afs" / "agent_registry.json").expanduser().resolve()
+
+    home_candidate = (Path.home() / ".afs" / "agent_registry.json").expanduser().resolve()
+    if os.access(_nearest_existing_parent(home_candidate), os.W_OK):
+        return home_candidate
+
+    return (Path(tempfile.gettempdir()) / "afs" / "agent_registry.json").resolve()
 
 
 def _parse_timestamp(value: str | None) -> datetime | None:

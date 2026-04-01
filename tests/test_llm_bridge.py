@@ -281,6 +281,25 @@ class TestQueryLLM:
         parsed = json.loads(result)
         assert parsed["status"] == "not_available"
 
+    def test_passes_system_prompt_when_provided(
+        self, claude_route: ModelRoute, sample_context: dict[str, Any],
+    ) -> None:
+        mock_fn = MagicMock(return_value="Claude result")
+        with patch.dict("afs.agents.llm_bridge._PROVIDER_MAP", {"claude": mock_fn}):
+            result = query_llm(
+                "test prompt",
+                sample_context,
+                claude_route,
+                system_prompt="Use the structured session context.",
+            )
+        assert result == "Claude result"
+        mock_fn.assert_called_once_with(
+            "test prompt",
+            sample_context,
+            "claude-3-5-sonnet",
+            "Use the structured session context.",
+        )
+
     def test_unknown_provider(self, sample_context: dict[str, Any]) -> None:
         route = ModelRoute(provider="unknown_provider", model_id="some-model")
         result = query_llm("test", sample_context, route)

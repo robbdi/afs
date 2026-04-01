@@ -34,7 +34,12 @@ LLM_TIMEOUT = 30
 # Provider implementations
 # ---------------------------------------------------------------------------
 
-def _query_claude(prompt: str, context: dict[str, Any], model_id: str) -> str:
+def _query_claude(
+    prompt: str,
+    context: dict[str, Any],
+    model_id: str,
+    system_prompt: str = "",
+) -> str:
     """Call Anthropic Claude via the anthropic SDK."""
     try:
         import anthropic
@@ -47,16 +52,19 @@ def _query_claude(prompt: str, context: dict[str, Any], model_id: str) -> str:
 
     try:
         client = anthropic.Anthropic(api_key=api_key, timeout=LLM_TIMEOUT)
-        message = client.messages.create(
-            model=model_id,
-            max_tokens=4096,
-            messages=[
+        kwargs: dict[str, Any] = {
+            "model": model_id,
+            "max_tokens": 4096,
+            "messages": [
                 {
                     "role": "user",
                     "content": f"{prompt}\n\nContext:\n{json.dumps(context, indent=2, default=str)}",
                 },
             ],
-        )
+        }
+        if system_prompt:
+            kwargs["system"] = system_prompt
+        message = client.messages.create(**kwargs)
         # Extract text from content blocks
         parts = []
         for block in message.content:
@@ -67,10 +75,16 @@ def _query_claude(prompt: str, context: dict[str, Any], model_id: str) -> str:
         return f"ERROR: Claude call failed: {exc}"
 
 
-def _query_gemini(prompt: str, context: dict[str, Any], model_id: str) -> str:
+def _query_gemini(
+    prompt: str,
+    context: dict[str, Any],
+    model_id: str,
+    system_prompt: str = "",
+) -> str:
     """Call Google Gemini via google.genai."""
     try:
         from google import genai
+        from google.genai import types
     except ImportError:
         return "ERROR: google-genai SDK not installed — pip install google-genai"
 
@@ -82,9 +96,13 @@ def _query_gemini(prompt: str, context: dict[str, Any], model_id: str) -> str:
             client = genai.Client()
 
         full_prompt = f"{prompt}\n\nContext:\n{json.dumps(context, indent=2, default=str)}"
+        config = types.GenerateContentConfig(
+            system_instruction=system_prompt,
+        ) if system_prompt else None
         response = client.models.generate_content(
             model=model_id,
             contents=full_prompt,
+            config=config,
         )
         text = response.text if hasattr(response, "text") else ""
         return text or "ERROR: empty response from Gemini"
@@ -92,7 +110,12 @@ def _query_gemini(prompt: str, context: dict[str, Any], model_id: str) -> str:
         return f"ERROR: Gemini call failed: {exc}"
 
 
-def _query_local(prompt: str, context: dict[str, Any], model_id: str) -> str:
+def _query_local(
+    prompt: str,
+    context: dict[str, Any],
+    model_id: str,
+    system_prompt: str = "",
+) -> str:
     """Call a local Ollama model via OpenAI-compatible API."""
     try:
         import httpx
@@ -100,9 +123,13 @@ def _query_local(prompt: str, context: dict[str, Any], model_id: str) -> str:
         return "ERROR: httpx not installed — pip install httpx"
 
     full_prompt = f"{prompt}\n\nContext:\n{json.dumps(context, indent=2, default=str)}"
+    messages: list[dict[str, str]] = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": full_prompt})
     payload = {
         "model": model_id,
-        "messages": [{"role": "user", "content": full_prompt}],
+        "messages": messages,
         "stream": False,
         "options": {
             "temperature": 0.5,
@@ -121,7 +148,12 @@ def _query_local(prompt: str, context: dict[str, Any], model_id: str) -> str:
         return f"ERROR: local model call failed: {exc}"
 
 
-def _query_codex(prompt: str, context: dict[str, Any], model_id: str) -> str:
+def _query_codex(
+    prompt: str,
+    context: dict[str, Any],
+    model_id: str,
+    system_prompt: str = "",
+) -> str:
     """Codex provider — placeholder, not yet available."""
     return json.dumps({
         "status": "not_available",
@@ -143,7 +175,13 @@ _PROVIDER_MAP = {
 }
 
 
-def query_llm(prompt: str, context: dict[str, Any], model_route: ModelRoute) -> str:
+def query_llm(
+    prompt: str,
+    context: dict[str, Any],
+    model_route: ModelRoute,
+    *,
+    system_prompt: str = "",
+) -> str:
     """Send a prompt + context to the LLM identified by *model_route*.
 
     Returns the response text on success, or a string prefixed with ``"ERROR:"``
@@ -154,6 +192,9 @@ def query_llm(prompt: str, context: dict[str, Any], model_route: ModelRoute) -> 
         prompt: The instruction / question for the LLM.
         context: Structured data to include as context.
         model_route: A ``ModelRoute`` from guardrails indicating provider + model_id.
+        system_prompt: Optional system prompt composed by ``model_prompts.py``.
+            When provided, it is passed to the provider as a system message
+            instead of being concatenated into the user prompt.
 
     Returns:
         Response text from the LLM, or an ``"ERROR: ..."`` string.
@@ -164,12 +205,15 @@ def query_llm(prompt: str, context: dict[str, Any], model_route: ModelRoute) -> 
         return f"ERROR: unknown provider '{provider}'"
 
     logger.info(
-        "LLM bridge: querying provider=%s model=%s prompt_len=%d",
-        provider, model_route.model_id, len(prompt),
+        "LLM bridge: querying provider=%s model=%s prompt_len=%d system_len=%d",
+        provider, model_route.model_id, len(prompt), len(system_prompt),
     )
 
     try:
-        result = handler(prompt, context, model_route.model_id)
+        if system_prompt:
+            result = handler(prompt, context, model_route.model_id, system_prompt)
+        else:
+            result = handler(prompt, context, model_route.model_id)
         return result
     except Exception as exc:
         return f"ERROR: unexpected failure in LLM bridge: {exc}"

@@ -574,6 +574,13 @@ class MemoryConsolidationConfig:
     )
     write_markdown: bool = True
 
+    # Auto-consolidation gate chain (cheapest check first, inspired by
+    # Claude Code's auto-dream pattern).  When running as a background
+    # service, these gates prevent unnecessary or too-frequent runs.
+    gate_min_hours: int = 24
+    gate_min_events: int = 20
+    gate_min_sessions: int = 3
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> MemoryConsolidationConfig:
         interval_seconds = data.get("interval_seconds", cls().interval_seconds)
@@ -616,6 +623,15 @@ class MemoryConsolidationConfig:
             if isinstance(include_event_types, list)
             else list(cls().include_event_types),
             write_markdown=bool(data.get("write_markdown", cls().write_markdown)),
+            gate_min_hours=int(data.get("gate_min_hours", cls().gate_min_hours))
+            if isinstance(data.get("gate_min_hours"), (int, float))
+            else cls().gate_min_hours,
+            gate_min_events=int(data.get("gate_min_events", cls().gate_min_events))
+            if isinstance(data.get("gate_min_events"), (int, float))
+            else cls().gate_min_events,
+            gate_min_sessions=int(data.get("gate_min_sessions", cls().gate_min_sessions))
+            if isinstance(data.get("gate_min_sessions"), (int, float))
+            else cls().gate_min_sessions,
         )
 
 

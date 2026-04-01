@@ -522,6 +522,133 @@ def memory_status(
     }
 
 
+@dataclass(frozen=True)
+class GateResult:
+    """Result of a consolidation gate check."""
+
+    passed: bool
+    gate: str
+    reason: str
+
+
+def check_consolidation_gates(
+    context_root: Path,
+    *,
+    config: AFSConfig | None = None,
+    lock_path: Path | None = None,
+) -> GateResult:
+    """Run the auto-consolidation gate chain (cheapest check first).
+
+    Gate order (inspired by Claude Code's auto-dream pattern):
+      1. Lock gate   — skip if another consolidation is in progress
+      2. Time gate   — skip if last run was less than gate_min_hours ago
+      3. Volume gate — skip if fewer than gate_min_events new events exist
+      4. Session gate — skip if fewer than gate_min_sessions bootstrap events
+
+    Returns a GateResult indicating whether consolidation should proceed.
+    """
+    config = config or load_config_model()
+    context_root = context_root.expanduser().resolve()
+    consolidation_cfg = config.memory_consolidation
+    agent_output_root = resolve_agent_output_root(context_root, config=config)
+    checkpoint_path = agent_output_root / consolidation_cfg.checkpoint_filename
+
+    # --- Gate 1: Lock ---
+    _lock_path = lock_path or (agent_output_root / "history_memory.lock")
+    if _lock_path.exists():
+        try:
+            lock_age = datetime.now(timezone.utc).timestamp() - _lock_path.stat().st_mtime
+            # Stale lock (>1 hour) is ignored
+            if lock_age < 3600:
+                return GateResult(False, "lock", "another consolidation is in progress")
+        except OSError:
+            pass
+
+    # --- Gate 2: Time ---
+    min_hours = consolidation_cfg.gate_min_hours
+    if min_hours > 0 and checkpoint_path.exists():
+        try:
+            age_seconds = datetime.now(timezone.utc).timestamp() - checkpoint_path.stat().st_mtime
+            age_hours = age_seconds / 3600
+            if age_hours < min_hours:
+                return GateResult(
+                    False,
+                    "time",
+                    f"last run was {age_hours:.1f}h ago (minimum {min_hours}h)",
+                )
+        except OSError:
+            pass
+
+    # --- Gate 3: Volume ---
+    min_events = consolidation_cfg.gate_min_events
+    if min_events > 0:
+        history_root = resolve_mount_root(context_root, MountType.HISTORY, config=config)
+        if history_root.exists():
+            cursor = _load_cursor(checkpoint_path)
+            normalized_event_types = _normalize_event_types(
+                consolidation_cfg.include_event_types
+            )
+            count = 0
+            for event in iter_history_events(
+                history_root,
+                event_types=normalized_event_types or None,
+                include_payloads=False,
+            ):
+                if not isinstance(event, dict):
+                    continue
+                if not _is_event_after_cursor(event, cursor):
+                    continue
+                if _should_skip_event(event):
+                    continue
+                count += 1
+                if count >= min_events:
+                    break
+            if count < min_events:
+                return GateResult(
+                    False,
+                    "volume",
+                    f"only {count} new events (minimum {min_events})",
+                )
+        else:
+            return GateResult(False, "volume", "history root does not exist")
+
+    # --- Gate 4: Session ---
+    min_sessions = consolidation_cfg.gate_min_sessions
+    if min_sessions > 0:
+        history_root = resolve_mount_root(context_root, MountType.HISTORY, config=config)
+        session_dir = history_root / "session"
+        session_count = 0
+        if session_dir.exists():
+            cursor = _load_cursor(checkpoint_path)
+            try:
+                for event_file in sorted(session_dir.iterdir()):
+                    if not event_file.is_file() or not event_file.suffix == ".json":
+                        continue
+                    try:
+                        event = json.loads(event_file.read_text(encoding="utf-8"))
+                    except (OSError, json.JSONDecodeError):
+                        continue
+                    if not isinstance(event, dict):
+                        continue
+                    if event.get("type") != "session" or event.get("op") != "bootstrap":
+                        continue
+                    if not _is_event_after_cursor(event, cursor):
+                        continue
+                    session_count += 1
+                    if session_count >= min_sessions:
+                        break
+            except OSError:
+                pass
+        if session_count < min_sessions:
+            return GateResult(
+                False,
+                "session",
+                f"only {session_count} sessions since last run (minimum {min_sessions})",
+            )
+
+    return GateResult(True, "all", "all gates passed")
+
+
 def search_memory(
     context_root: Path,
     query: str,

@@ -7,7 +7,7 @@ import time
 from collections.abc import Sequence
 from pathlib import Path
 
-from ..memory_consolidation import consolidate_history_to_memory
+from ..memory_consolidation import check_consolidation_gates, consolidate_history_to_memory
 from .base import (
     AgentResult,
     build_base_parser,
@@ -66,6 +66,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--sleep-first",
         action="store_true",
         help="Sleep for interval before the first run.",
+    )
+    parser.add_argument(
+        "--no-gates",
+        action="store_true",
+        help="Skip auto-consolidation gate checks (time, volume, session, lock).",
     )
     return parser
 
@@ -139,11 +144,50 @@ def run(args: argparse.Namespace) -> int:
     config = load_agent_config(args.config)
     interval = _resolve_interval(args, config)
     runs = 0
+    use_gates = interval > 0 and not args.no_gates
 
     if interval > 0 and args.sleep_first:
         time.sleep(interval)
 
     while True:
+        # When running as a background service, check gates before each run.
+        # Single-shot mode (interval=0) always runs unconditionally.
+        if use_gates:
+            context_root = (
+                Path(args.context_root).expanduser().resolve()
+                if args.context_root
+                else config.general.context_root
+            )
+            gate = check_consolidation_gates(context_root, config=config)
+            if not gate.passed:
+                result = AgentResult(
+                    name=AGENT_NAME,
+                    status="skipped",
+                    started_at=now_iso(),
+                    finished_at=now_iso(),
+                    duration_seconds=0.0,
+                    metrics={},
+                    notes=[f"gate:{gate.gate} — {gate.reason}"],
+                    payload={"gate": gate.gate, "reason": gate.reason},
+                )
+                output_path = None
+                if args.output:
+                    output_path = Path(args.output)
+                elif config.memory_consolidation.report_output:
+                    output_path = Path(config.memory_consolidation.report_output)
+                emit_result(
+                    result,
+                    output_path=output_path,
+                    force_stdout=args.stdout,
+                    pretty=args.pretty,
+                )
+                if interval <= 0:
+                    break
+                if args.max_runs and runs >= args.max_runs:
+                    break
+                time.sleep(interval)
+                continue
+
         runs += 1
         result = _run_consolidation(args, config)
         result.payload["run_index"] = runs
