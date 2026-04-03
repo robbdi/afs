@@ -14,7 +14,7 @@ try:
         analyze_scores,
     )
 except RuntimeError:
-    pytest.skip("afs.training moved to afs-scawful", allow_module_level=True)
+    pytest.skip("afs.training moved to afs-ext", allow_module_level=True)
 
 
 class TestScoringWeights:

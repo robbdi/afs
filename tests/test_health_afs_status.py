@@ -97,7 +97,7 @@ def test_collect_afs_health_snapshot(tmp_path: Path, monkeypatch) -> None:
 def test_detect_mcp_running_matches_cli_variants() -> None:
     assert _looks_like_afs_mcp_command("/usr/bin/python3 -m afs.mcp_server")
     assert _looks_like_afs_mcp_command("/usr/bin/python3 -m afs mcp serve")
-    assert _looks_like_afs_mcp_command("/Users/scawful/src/lab/afs/scripts/afs mcp serve")
+    assert _looks_like_afs_mcp_command("$AFS_ROOT/scripts/afs mcp serve")
     assert not _looks_like_afs_mcp_command("/usr/bin/python3 -m afs health")
 
 

@@ -385,10 +385,10 @@ async def fs_query_handler(args: dict[str, Any]) -> ToolResult:
 
 def _load_scawful_agent_tools():
     try:
-        from afs_scawful import agent_tools
+        from afs_ext import agent_tools
     except Exception as exc:  # pragma: no cover - compatibility path
         raise RuntimeError(
-            "Domain-specific agent tools moved to the afs-scawful extension."
+            "Domain-specific agent tools moved to the afs-ext extension."
         ) from exc
     return agent_tools
 
@@ -582,7 +582,7 @@ def _load_default_triforce_tools() -> list[Tool]:
     try:
         return create_triforce_tools()
     except RuntimeError:
-        logger.debug("afs-scawful extension not available; TRIFORCE_TOOLS disabled")
+        logger.debug("afs-ext extension not available; TRIFORCE_TOOLS disabled")
         return []
 
 

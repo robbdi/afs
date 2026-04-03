@@ -24,7 +24,7 @@ The knowledge base is mounted into AFS via the active profile's
 
 ```toml
 [profiles.dev]
-knowledge_mounts = ["/Users/scawful/src/lab/afs-scawful/knowledge", "/Users/scawful/.context/knowledge"]
+knowledge_mounts = ["$AFS_ROOT-scawful/knowledge", "~/.context/knowledge"]
 ```
 
 ### Adding a New Knowledge Document
@@ -128,12 +128,12 @@ If you add a new doc, wire it into at least path 1 (CLAUDE.md) and path 4
 | `CLAUDE.md` | `~/src/hobby/oracle-of-secrets/` | "Reference Knowledge" table |
 | `CLAUDE.md` | `~/src/hobby/yaze/` | "Reference Knowledge" table |
 | `CONTEXT_INDEX.md` | `~/src/hobby/oracle-of-secrets/.context/` | "Global Knowledge Base" + domain tables |
-| `mesen2-oos-debugging/SKILL.md` | `~/src/lab/afs-scawful/skills/` | "Knowledge References" |
-| `alttp-disasm-labels/SKILL.md` | `~/src/lab/afs-scawful/skills/` | "Knowledge References" |
-| `hyrule-navigator/SKILL.md` | `~/src/lab/afs-scawful/skills/` | "Knowledge References" |
-| `zelda-model-manager/SKILL.md` | `~/src/lab/afs-scawful/skills/` | "Knowledge References" |
-| `echo-persona/SKILL.md` | `~/src/lab/afs-scawful/skills/` | "Knowledge References" |
-| `model-training-expert/SKILL.md` | `~/src/lab/afs-scawful/skills/` | "Knowledge References" |
+| `mesen2-oos-debugging/SKILL.md` | `~/src/lab/afs-ext/skills/` | "Knowledge References" |
+| `alttp-disasm-labels/SKILL.md` | `~/src/lab/afs-ext/skills/` | "Knowledge References" |
+| `hyrule-navigator/SKILL.md` | `~/src/lab/afs-ext/skills/` | "Knowledge References" |
+| `zelda-model-manager/SKILL.md` | `~/src/lab/afs-ext/skills/` | "Knowledge References" |
+| `echo-persona/SKILL.md` | `~/src/lab/afs-ext/skills/` | "Knowledge References" |
+| `model-training-expert/SKILL.md` | `~/src/lab/afs-ext/skills/` | "Knowledge References" |
 
 ---
 

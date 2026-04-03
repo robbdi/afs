@@ -7,13 +7,13 @@ generic here; refer to workspace docs for specifics.
 
 - Workspace infrastructure: `~/src/docs/NERV_INFRASTRUCTURE.md`
 - Source universe sync: `~/src/docs/SRC_UNIVERSE_NETWORK.md`
-- Windows workflow: `~/src/lab/afs-scawful/docs/WINDOWS_WORKFLOW.md`
+- Windows workflow: `~/src/lab/afs-ext/docs/WINDOWS_WORKFLOW.md`
 
 ## Codenames (no IPs)
 
 - **ORACLE**: macOS primary workstation (`mac`)
-- **MECHANICA**: Windows GPU node (`medical-mechanica`)
-- **NEXUS**: Linux server (`halext-nj`)
+- **MECHANICA**: Windows GPU node (`remote-gpu`)
+- **NEXUS**: Linux server (`remote-server`)
 
 Use SSH host aliases rather than hardcoded IPs.
 

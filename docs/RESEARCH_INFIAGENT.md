@@ -3,7 +3,7 @@
 **Source:** InfiAgent: An Infinite-Horizon Framework for General-Purpose Autonomous Agents
 **Authors:** Chenglin Yu, Yuchen Wang, Songmiao Wang, Hongxia Yang, Ming Li
 **Date:** January 2026
-**File:** `/Users/scawful/Documents/Research/2601.03204.pdf`
+**File:** `~/Documents/Research/2601.03204.pdf`
 **Repo:** `https://github.com/ChenglinPoly/infiAgent`
 
 ## Overview

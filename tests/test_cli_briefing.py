@@ -12,7 +12,7 @@ from afs.cli import briefing
 def test_briefing_reads_agents_from_registry(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(briefing, "PROJECTS", {})
-    monkeypatch.setattr(briefing, "_fetch_halext_tasks", lambda: [])
+    monkeypatch.setattr(briefing, "_fetch_tasks", lambda: [])
     monkeypatch.setattr(briefing, "_latest_weekly_carryover", lambda: [])
 
     now = datetime.now()
@@ -65,7 +65,7 @@ def test_briefing_registry_loader_accepts_list_payload(tmp_path: Path, monkeypat
 
 def test_briefing_skips_gws_when_disabled(monkeypatch) -> None:
     monkeypatch.setattr(briefing, "PROJECTS", {})
-    monkeypatch.setattr(briefing, "_fetch_halext_tasks", lambda: [])
+    monkeypatch.setattr(briefing, "_fetch_tasks", lambda: [])
     monkeypatch.setattr(briefing, "_latest_weekly_carryover", lambda: [])
     monkeypatch.setattr(
         briefing,
@@ -82,7 +82,7 @@ def test_briefing_skips_gws_when_disabled(monkeypatch) -> None:
 
 def test_briefing_reads_gws_when_authenticated(monkeypatch) -> None:
     monkeypatch.setattr(briefing, "PROJECTS", {})
-    monkeypatch.setattr(briefing, "_fetch_halext_tasks", lambda: [])
+    monkeypatch.setattr(briefing, "_fetch_tasks", lambda: [])
     monkeypatch.setattr(briefing, "_latest_weekly_carryover", lambda: [])
 
     class _FakeGWSClient:
@@ -106,7 +106,7 @@ def test_briefing_reads_gws_when_authenticated(monkeypatch) -> None:
 
 def test_briefing_skips_gws_when_client_is_not_authenticated(monkeypatch) -> None:
     monkeypatch.setattr(briefing, "PROJECTS", {})
-    monkeypatch.setattr(briefing, "_fetch_halext_tasks", lambda: [])
+    monkeypatch.setattr(briefing, "_fetch_tasks", lambda: [])
     monkeypatch.setattr(briefing, "_latest_weekly_carryover", lambda: [])
 
     class _FakeGWSClient:

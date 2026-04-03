@@ -44,7 +44,7 @@
 
 ### Start the Dashboard
 ```bash
-cd /Users/scawful/src/lab/afs/dashboard
+cd $AFS_ROOT/dashboard
 ./serve.sh
 ```
 Dashboard opens at `http://localhost:5000`
@@ -207,7 +207,7 @@ Replace in `api.py`:
 ## Project Structure
 
 ```
-/Users/scawful/src/lab/afs/dashboard/
+$AFS_ROOT/dashboard/
 ├── api.py ...................... Flask backend
 ├── index.html .................. Dashboard HTML
 ├── app.js ...................... Frontend logic

@@ -468,14 +468,14 @@ config:
 
 ```toml
 [services.services.context-watch]
-context_filters = ["/Users/scawful/src/lab"]
+context_filters = ["~/src/lab"]
 ```
 
 Codex MCP config:
 
 ```toml
 [mcp_servers.afs]
-command = "/Users/scawful/src/lab/afs/scripts/afs"
+command = "$AFS_ROOT/scripts/afs"
 args = ["mcp", "serve"]
 ```
 

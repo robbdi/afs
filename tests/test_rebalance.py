@@ -5,7 +5,7 @@ import pytest
 try:
     from afs.training.rebalance import rebalance_dataset
 except RuntimeError:
-    pytest.skip("afs.training moved to afs-scawful", allow_module_level=True)
+    pytest.skip("afs.training moved to afs-ext", allow_module_level=True)
 
 
 def _write_samples(path, samples):

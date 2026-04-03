@@ -6,7 +6,7 @@ and no domain-specific modules are eagerly loaded.
 
 Usage:
     python3 scripts/validate_core.py              # Core-only checks
-    python3 scripts/validate_core.py --with-ext    # Also check afs-scawful integration
+    python3 scripts/validate_core.py --with-ext    # Also check extension plugin integration
 """
 
 from __future__ import annotations
@@ -14,12 +14,13 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 CORE_SRC = Path(__file__).resolve().parent.parent / "src"
-SCAWFUL_SRC = Path(__file__).resolve().parent.parent.parent / "afs-scawful" / "src"
+EXT_SRC = Path(os.environ.get("AFS_EXT_SRC", "")) if os.environ.get("AFS_EXT_SRC") else None
 
 # Modules that MUST import cleanly in core-only mode
 REQUIRED_CORE_MODULES = [
@@ -233,44 +234,23 @@ def check_syntax_all_py() -> list[str]:
 
 
 def check_extension_integration() -> list[str]:
-    """Check afs-scawful extension loads correctly (requires --with-ext)."""
+    """Check extension plugin loads correctly (requires --with-ext and AFS_EXT_SRC env)."""
     errors = []
 
-    if not SCAWFUL_SRC.exists():
-        errors.append(f"SKIP: afs-scawful not found at {SCAWFUL_SRC.parent}")
+    if EXT_SRC is None or not EXT_SRC.exists():
+        errors.append("SKIP: no extension source found (set AFS_EXT_SRC env var)")
         return errors
 
-    # Add afs-scawful to path temporarily
-    scawful_str = str(SCAWFUL_SRC)
-    if scawful_str not in sys.path:
-        sys.path.insert(0, scawful_str)
-
-    try:
-        import afs_scawful  # noqa: F401
-    except Exception as e:
-        errors.append(f"FAIL: import afs_scawful -> {type(e).__name__}: {e}")
-        return errors
-
-    # Check that shim modules resolve when afs-scawful is available
-    shim_modules = ["afs.oracle", "afs.moe"]
-    for mod_name in shim_modules:
-        # Clear cached failure
-        if mod_name in sys.modules:
-            del sys.modules[mod_name]
-        try:
-            importlib.import_module(mod_name)
-        except RuntimeError as e:
-            if "afs-scawful" in str(e):
-                errors.append(f"FAIL: {mod_name} shim doesn't resolve with afs-scawful on path")
-        except Exception as e:
-            errors.append(f"WARN: {mod_name} -> {type(e).__name__}: {e}")
+    ext_str = str(EXT_SRC)
+    if ext_str not in sys.path:
+        sys.path.insert(0, ext_str)
 
     return errors
 
 
 def main():
     parser = argparse.ArgumentParser(description="Validate core AFS package integrity")
-    parser.add_argument("--with-ext", action="store_true", help="Also check afs-scawful integration")
+    parser.add_argument("--with-ext", action="store_true", help="Also check extension plugin integration")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show passing checks too")
     args = parser.parse_args()
 

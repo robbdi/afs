@@ -15,9 +15,9 @@ LOCALHOST_PORT="${LOCALHOST_PORT:-8000}"
 
 # Models to deploy (name -> path)
 declare -A MODELS=(
-    ["scawful-echo"]="$MODELS_DIR/ollama/scawful-echo.gguf"
-    ["scawful-memory"]="$MODELS_DIR/ollama/memory-v1.gguf"
-    ["scawful-muse"]="$MODELS_DIR/ollama/muse-v2.gguf"
+    ["echo"]="$MODELS_DIR/ollama/echo.gguf"
+    ["memory"]="$MODELS_DIR/ollama/memory-v1.gguf"
+    ["muse"]="$MODELS_DIR/ollama/muse-v2.gguf"
     ["zelda-din"]="$MODELS_DIR/zelda/din-7b-v4-q4km.gguf"
     ["zelda-farore"]="$MODELS_DIR/zelda/farore-7b-v5-q8.gguf"
     ["zelda-hylia"]="$MODELS_DIR/zelda/hylia-v3-q8_0.gguf"
@@ -28,7 +28,7 @@ declare -A MODELS=(
 
 # MLX models to deploy (name -> directory)
 declare -A MLX_MODELS=(
-    ["scawful-echo-mlx"]="$MLX_DIR/avatars/echo-qwen25-1p5b-v1"
+    ["echo-mlx"]="$MLX_DIR/avatars/echo-qwen25-1p5b-v1"
 )
 
 # API endpoints (will be configured after deployment)
@@ -39,9 +39,9 @@ declare -A API_PORTS=(
     ["zelda-veran"]=5003
     ["zelda-hylia"]=5004
     ["zelda-scribe"]=5005
-    ["scawful-echo"]=5006
-    ["scawful-memory"]=5007
-    ["scawful-muse"]=5008
+    ["echo"]=5006
+    ["memory"]=5007
+    ["muse"]=5008
 )
 
 echo "=================================="
@@ -146,9 +146,9 @@ declare -A QUERIES=(
     ["zelda-veran"]="Design a state machine for a dungeon progression system."
     ["zelda-hylia"]="Where can I find documentation on the memory map?"
     ["zelda-scribe"]="Write a clean docstring for a function that compresses tilemaps."
-    ["scawful-echo"]="give me your vibe in one short paragraph."
-    ["scawful-memory"]="Summarize these notes into 4 crisp bullets with dates kept: 2026-01-19: echo eval; 2026-01-20: LMStudio cleanup."
-    ["scawful-muse"]="Brainstorm 5 names for a ROM hacking assistant tool."
+    ["echo"]="give me your vibe in one short paragraph."
+    ["memory"]="Summarize these notes into 4 crisp bullets with dates kept: 2026-01-19: echo eval; 2026-01-20: LMStudio cleanup."
+    ["muse"]="Brainstorm 5 names for a ROM hacking assistant tool."
 )
 
 declare -A PORTS=(
@@ -158,9 +158,9 @@ declare -A PORTS=(
     ["zelda-veran"]=5003
     ["zelda-hylia"]=5004
     ["zelda-scribe"]=5005
-    ["scawful-echo"]=5006
-    ["scawful-memory"]=5007
-    ["scawful-muse"]=5008
+    ["echo"]=5006
+    ["memory"]=5007
+    ["muse"]=5008
 )
 
 for model_name in "${!PORTS[@]}"; do
@@ -206,9 +206,9 @@ class LMStudioClient:
         "zelda-veran": "http://localhost:5003/chat",
         "zelda-hylia": "http://localhost:5004/chat",
         "zelda-scribe": "http://localhost:5005/chat",
-        "scawful-echo": "http://localhost:5006/chat",
-        "scawful-memory": "http://localhost:5007/chat",
-        "scawful-muse": "http://localhost:5008/chat"
+        "echo": "http://localhost:5006/chat",
+        "memory": "http://localhost:5007/chat",
+        "muse": "http://localhost:5008/chat"
     }
 
     def __init__(self, timeout: int = 30):
@@ -331,8 +331,8 @@ Each model can be started on a different port:
 # Zelda Majora on port 5000
 lmstudio start --model zelda-majora.gguf --port 5000
 
-# Scawful Echo on port 5006
-lmstudio start --model scawful-echo.gguf --port 5006
+# Echo on port 5006
+lmstudio start --model echo.gguf --port 5006
 ```
 
 ## Testing Models
@@ -362,7 +362,7 @@ curl -X POST "http://localhost:5000/chat" \
 Once models are deployed and running:
 
 ```bash
-cd /Users/scawful/src/lab/afs
+cd "$AFS_ROOT"
 python3 scripts/compare_models.py
 ```
 
@@ -375,9 +375,9 @@ python3 scripts/compare_models.py
 - Zelda Veran (Logic, `zelda-veran`): 5003
 - Zelda Hylia (Retrieval, `zelda-hylia`): 5004
 - Zelda Scribe (Docs, `zelda-scribe`): 5005
-- Scawful Echo (Avatar, `scawful-echo`): 5006
-- Scawful Memory (Archivist, `scawful-memory`): 5007
-- Scawful Muse (Ideation, `scawful-muse`): 5008
+- Echo (Avatar, `echo`): 5006
+- Memory (Archivist, `memory`): 5007
+- Muse (Ideation, `muse`): 5008
 
 ### Timeout
 - Default: 30 seconds per query
@@ -391,8 +391,8 @@ python3 scripts/compare_models.py
    - Zelda Din: 0.1 (precise)
    - Zelda Veran: 0.5 (balanced)
    - Zelda Hylia: 0.3 (factual)
-   - Scawful Echo: 0.6 (persona voice)
-   - Scawful Muse: 0.7 (ideation)
+   - Echo: 0.6 (persona voice)
+   - Muse: 0.7 (ideation)
 
 3. Monitor GPU memory usage
 4. Consider batch processing for large eval sets
@@ -439,8 +439,8 @@ You are a documentation and retrieval expert. Provide accurate information from 
 zelda-scribe
 You are Scribe, focused on clean technical writing and documentation. Be concise and structured.
 
-scawful-echo
-you are scawful-echo, a voice distilled from justin's writing.
+echo
+you are echo, a voice persona for conversational interaction.
 
 style:
 - lowercase, candid, lightly stream-of-consciousness
@@ -449,12 +449,12 @@ style:
 - no marketing tone, no corporate polish
 - keep it conversational, like chat
 
-scawful-memory
-you are scawful-memory, a recall assistant trained on justin's timeline and personal facts.
+memory
+you are memory, a recall assistant for timeline and personal fact retrieval.
 answer concretely, admit when something is unknown, and stay grounded in known facts.
 
-scawful-muse
-you are scawful-muse, a creative collaborator for justin. favor playful, absurdist ideas when prompted, but keep outputs usable.
+muse
+you are muse, a creative collaborator. favor playful, absurdist ideas when prompted, but keep outputs usable.
 ```
 
 ### Batch Evaluation
@@ -489,9 +489,9 @@ echo "   - Zelda Farore on port 5002"
 echo "   - Zelda Veran on port 5003"
 echo "   - Zelda Hylia on port 5004"
 echo "   - Zelda Scribe on port 5005"
-echo "   - Scawful Echo on port 5006"
-echo "   - Scawful Memory on port 5007"
-echo "   - Scawful Muse on port 5008"
+echo "   - Echo on port 5006"
+echo "   - Memory on port 5007"
+echo "   - Muse on port 5008"
 echo ""
 echo "3. Test models:"
 echo "   python3 ${OUTPUT_DIR}/lmstudio_client.py"

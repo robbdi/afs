@@ -136,7 +136,7 @@ API → JSON → Browser → Chart.js → Visualization
 ### Fastest Way to Run
 
 ```bash
-cd /Users/scawful/src/lab/afs/dashboard
+cd $AFS_ROOT/dashboard
 ./serve.sh
 ```
 
@@ -180,7 +180,7 @@ python3 api.py
 ## File Locations
 
 ```
-/Users/scawful/src/lab/afs/
+$AFS_ROOT/
 ├── dashboard/                    # This project
 │   ├── index.html               # Main HTML
 │   ├── app.js                   # Frontend logic

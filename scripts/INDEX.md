@@ -225,7 +225,7 @@ Ready for use!
 
 ---
 
-**Location:** `/Users/scawful/src/lab/afs/scripts/`
+**Location:** `$AFS_ROOT/scripts/`
 
 **All scripts are production-ready with:**
 - Error handling and recovery

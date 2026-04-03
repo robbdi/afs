@@ -86,9 +86,9 @@ EXPERT_MODELS = {
 MCP_SERVERS = {
     "yaze-debugger": MCPServer(
         name="yaze-debugger",
-        command="/Users/scawful/Code/yaze-mcp/venv/bin/python",
-        args=["/Users/scawful/Code/yaze-mcp/server.py"],
-        env={"PYTHONPATH": "/Users/scawful/Code/yaze-mcp"},
+        command=os.environ.get("AFS_YAZE_PYTHON", "python"),
+        args=[os.environ.get("AFS_YAZE_SERVER", "yaze-mcp/server.py")],
+        env={"PYTHONPATH": os.environ.get("AFS_YAZE_MCP_PATH", "")},
         tools=[
             "control_emulator",
             "step_emulator",

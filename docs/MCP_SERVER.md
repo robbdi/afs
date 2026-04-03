@@ -38,7 +38,7 @@ user-level and project-level Gemini configs.
 Manual alternative:
 
 ```bash
-gemini mcp add afs /Users/scawful/src/lab/afs/scripts/afs mcp serve
+gemini mcp add afs $AFS_ROOT/scripts/afs mcp serve
 ```
 
 If Gemini is running inside an environment where `afs` is already installed,
@@ -56,7 +56,7 @@ Codex uses `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.afs]
-command = "/Users/scawful/src/lab/afs/scripts/afs"
+command = "$AFS_ROOT/scripts/afs"
 args = ["mcp", "serve"]
 ```
 
@@ -77,12 +77,12 @@ been the most reliable path in practice.
 {
   "mcpServers": {
     "afs": {
-      "command": "/Users/scawful/src/lab/afs/.venv/bin/python",
+      "command": "$AFS_ROOT/.venv/bin/python",
       "args": ["-m", "afs.mcp_server"],
       "env": {
-        "AFS_ROOT": "/Users/scawful/src/lab/afs",
-        "AFS_VENV": "/Users/scawful/src/lab/afs/.venv",
-        "PYTHONPATH": "/Users/scawful/src/lab/afs/src"
+        "AFS_ROOT": "$AFS_ROOT",
+        "AFS_VENV": "$AFS_ROOT/.venv",
+        "PYTHONPATH": "$AFS_ROOT/src"
       }
     }
   }
@@ -122,12 +122,12 @@ transport assumptions or via a brittle shell wrapper.
 Recommended fixes:
 
 1. Use the direct venv Python entrypoint shown above:
-   `command=/Users/scawful/src/lab/afs/.venv/bin/python`
+   `command=$AFS_ROOT/.venv/bin/python`
    `args=["-m", "afs.mcp_server"]`
 2. Preserve the repo env:
-   `AFS_ROOT=/Users/scawful/src/lab/afs`
-   `AFS_VENV=/Users/scawful/src/lab/afs/.venv`
-   `PYTHONPATH=/Users/scawful/src/lab/afs/src`
+   `AFS_ROOT=$AFS_ROOT`
+   `AFS_VENV=$AFS_ROOT/.venv`
+   `PYTHONPATH=$AFS_ROOT/src`
 3. Restart Claude Desktop fully with `Cmd+Q`, not just by closing the window.
 4. Re-check `~/Library/Logs/Claude/mcp-server-afs.log`.
 
@@ -154,7 +154,7 @@ In Antigravity, open `MCP Servers -> Manage MCP Servers -> View raw config`, the
 {
   "mcpServers": {
     "afs": {
-      "command": "/Users/scawful/src/lab/afs/scripts/afs",
+      "command": "$AFS_ROOT/scripts/afs",
       "args": ["mcp", "serve"]
     }
   }

@@ -9,7 +9,7 @@ AFS supports two extension mechanisms:
 
 Discovery inputs:
 
-- Name prefix (`afs_plugin`, optionally `afs_scawful`)
+- Name prefix (`afs_plugin`, optionally `afs_ext`)
 - Configured `plugin_dirs`
 - `AFS_PLUGIN_DIRS`
 - Default directories: `~/.config/afs/plugins`, `~/.afs/plugins`

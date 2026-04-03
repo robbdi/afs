@@ -10,7 +10,7 @@ Created a production-ready terminal user interface (TUI) for real-time monitorin
 
 ### 1. Main Application
 
-**File**: `/Users/scawful/src/lab/afs/scripts/training_monitor_tui.py`
+**File**: `$AFS_ROOT/scripts/training_monitor_tui.py`
 - **Size**: 21 KB
 - **Lines**: 620+
 - **Language**: Python 3.10+

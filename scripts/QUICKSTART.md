@@ -66,7 +66,7 @@ python3 merge_and_quantize.py \
 
 ## Configuration
 
-Edit `/Users/scawful/src/lab/afs/scripts/deployment_config.yaml`:
+Edit `$AFS_ROOT/scripts/deployment_config.yaml`:
 
 **Critical settings:**
 - `vast.models[].instance_id` - vast.ai instance IDs

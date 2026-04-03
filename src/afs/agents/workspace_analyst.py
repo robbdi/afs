@@ -33,7 +33,6 @@ AGENT_CAPABILITIES = {
 DEFAULT_SCAN_ROOTS = [
     Path.home() / "src" / "lab",
     Path.home() / "src" / "hobby",
-    Path.home() / "src" / "halext",
 ]
 
 
@@ -200,7 +199,7 @@ def build_parser():
     parser.add_argument(
         "--scan-roots",
         nargs="*",
-        help="Directories to scan for git repos (default: lab, hobby, halext).",
+        help="Directories to scan for git repos (default: ~/src/lab, ~/src/hobby).",
     )
     parser.add_argument(
         "--max-depth",

@@ -4,7 +4,7 @@ set -euo pipefail
 # AFS Supervisor LaunchAgent management
 # Usage: afs-supervisor-ctl {install|uninstall|start|stop|status|logs}
 
-PLIST_NAME="com.halext.afs-supervisor"
+PLIST_NAME="com.afs.supervisor"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_PLIST="${SCRIPT_DIR}/${PLIST_NAME}.plist"
 TARGET_DIR="${HOME}/Library/LaunchAgents"
@@ -89,7 +89,7 @@ cmd_status() {
 
     echo ""
     echo "=== Last Run ==="
-    LAST_RUN="${HOME}/src/lab/.context/scratchpad/afs_agents/supervisor_last_run.json"
+    LAST_RUN="${HOME}/.config/afs/agents/supervisor_last_run.json"
     if [ -f "$LAST_RUN" ]; then
         python3 -c "
 import json, sys

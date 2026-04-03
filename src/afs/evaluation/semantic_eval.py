@@ -26,11 +26,11 @@ logger = logging.getLogger(__name__)
 # Default paths (can be overridden via environment)
 ASAR_PATH = os.environ.get(
     "AFS_ASAR_PATH",
-    "/Users/scawful/src/third_party/asar-repo/build/asar/bin/asar"
+    "asar"
 )
 DUMMY_ROM_PATH = os.environ.get(
     "AFS_ASAR_ROM",
-    "/Users/scawful/src/training/roms/dummy.sfc"
+    "dummy.sfc"
 )
 YAZE_GRPC_TARGET = os.environ.get("YAZE_GRPC_TARGET", "127.0.0.1:50051")
 
@@ -224,7 +224,9 @@ class SemanticEvaluator:
             try:
                 # Try to import the yaze-mcp client
                 import sys
-                sys.path.insert(0, "/Users/scawful/src/tools/yaze-mcp")
+                yaze_path = os.environ.get("AFS_YAZE_MCP_PATH", "")
+                if yaze_path:
+                    sys.path.insert(0, yaze_path)
                 from core.emulator_client import EmulatorClient, SymbolResolver
 
                 symbols_path = os.environ.get(

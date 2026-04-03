@@ -185,7 +185,7 @@ def run_template_gen(
     day_name = target_date.strftime("%A")
     sections = [
         f"#+TITLE: Daily — {target_date.isoformat()} {day_name}",
-        "#+AUTHOR: Justin Scofield",
+        "#+AUTHOR: AFS",
         "",
         "* Morning",
         "- ",
@@ -354,7 +354,7 @@ def run_weekly_review(
 
     content = (
         f"#+TITLE: Weekly Review — {week_label} ({month_range})\n"
-        f"#+AUTHOR: Justin Scofield\n"
+        f"#+AUTHOR: AFS\n"
         f"\n"
         f"* Wins\n"
         f"{_fmt(wins)}"

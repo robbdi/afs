@@ -95,56 +95,56 @@ class ModelConfig:
 
         return cls(provider=provider, model_id=model_id)
 
-    # Compatibility presets now owned by afs-scawful
+    # Compatibility presets now owned by afs-ext
     @classmethod
     def din(cls) -> ModelConfig:
-        """Compatibility preset for afs-scawful."""
+        """Compatibility preset for afs-ext."""
         return _load_scawful_preset("din")
 
     @classmethod
     def nayru(cls) -> ModelConfig:
-        """Compatibility preset for afs-scawful."""
+        """Compatibility preset for afs-ext."""
         return _load_scawful_preset("nayru")
 
     @classmethod
     def farore(cls) -> ModelConfig:
-        """Compatibility preset for afs-scawful."""
+        """Compatibility preset for afs-ext."""
         return _load_scawful_preset("farore")
 
     @classmethod
     def veran(cls) -> ModelConfig:
-        """Compatibility preset for afs-scawful."""
+        """Compatibility preset for afs-ext."""
         return _load_scawful_preset("veran")
 
-    # LMStudio compatibility presets now owned by afs-scawful
+    # LMStudio compatibility presets now owned by afs-ext
     @classmethod
     def din_lmstudio(cls) -> ModelConfig:
-        """Compatibility preset for afs-scawful."""
+        """Compatibility preset for afs-ext."""
         return _load_scawful_preset("din_lmstudio")
 
     @classmethod
     def farore_lmstudio(cls) -> ModelConfig:
-        """Compatibility preset for afs-scawful."""
+        """Compatibility preset for afs-ext."""
         return _load_scawful_preset("farore_lmstudio")
 
     @classmethod
     def veran_lmstudio(cls) -> ModelConfig:
-        """Compatibility preset for afs-scawful."""
+        """Compatibility preset for afs-ext."""
         return _load_scawful_preset("veran_lmstudio")
 
     @classmethod
     def majora_lmstudio(cls) -> ModelConfig:
-        """Compatibility preset for afs-scawful."""
+        """Compatibility preset for afs-ext."""
         return _load_scawful_preset("majora_lmstudio")
 
 
 def _load_scawful_preset(name: str) -> ModelConfig:
     """Load an extension-owned preset without baking it into core AFS."""
     try:
-        from afs_scawful.agent_model_presets import build_preset
+        from afs_ext.agent_model_presets import build_preset
     except Exception as exc:  # pragma: no cover - compatibility path
         raise RuntimeError(
-            "Domain-specific model presets moved to the afs-scawful extension."
+            "Domain-specific model presets moved to the afs-ext extension."
         ) from exc
 
     return build_preset(name)

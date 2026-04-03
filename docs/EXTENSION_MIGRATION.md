@@ -1,8 +1,8 @@
-# AFS Scawful Migration
+# AFS Extension Migration
 
 This repository (`lab/afs`) now documents and ships **core AFS platform capabilities** only.
 
-Domain-specific content has moved to `lab/afs-scawful`, including:
+Domain-specific content has moved to `lab/afs-ext`, including:
 
 - Persona/model lineages
 - Fine-tuning and dataset orchestration workflows
@@ -17,7 +17,7 @@ If a workflow is specific to:
 - game/domain corpora
 - personal workstation/laptop deployment paths
 
-it belongs in `afs-scawful`.
+it belongs in `afs-ext`.
 
 ## What Stays in Core AFS
 
@@ -31,6 +31,6 @@ it belongs in `afs-scawful`.
 ## Recommended Layout
 
 - Core docs: `lab/afs/docs/`
-- Domain/training docs: `lab/afs-scawful/docs/`
-- Domain skills: `lab/afs-scawful/skills/`
-- Domain registries/policies: `lab/afs-scawful/config/`
+- Domain/training docs: `lab/afs-ext/docs/`
+- Domain skills: `lab/afs-ext/skills/`
+- Domain registries/policies: `lab/afs-ext/config/`

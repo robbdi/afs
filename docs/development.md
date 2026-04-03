@@ -4,7 +4,7 @@
 
 This repository documents and develops core AFS platform features.
 
-Domain-specific and model-training development flows live in afs-scawful.
+Domain-specific and model-training development flows live in afs-ext.
 See docs/SCAWFUL_MIGRATION.md.
 
 ## Local Setup

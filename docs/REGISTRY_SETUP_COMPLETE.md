@@ -1,6 +1,6 @@
 # REGISTRY_SETUP_COMPLETE.md
 
-This document has moved to afs-scawful.
+This document has moved to afs-ext.
 
 Core afs documentation in this repository now only covers Agentic File System
 platform primitives and machine-agnostic operations.

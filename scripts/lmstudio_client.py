@@ -18,9 +18,9 @@ class LMStudioClient:
         "zelda-veran": "http://localhost:5003/chat",
         "zelda-hylia": "http://localhost:5004/chat",
         "zelda-scribe": "http://localhost:5005/chat",
-        "scawful-echo": "http://localhost:5006/chat",
-        "scawful-memory": "http://localhost:5007/chat",
-        "scawful-muse": "http://localhost:5008/chat"
+        "echo": "http://localhost:5006/chat",
+        "memory": "http://localhost:5007/chat",
+        "muse": "http://localhost:5008/chat"
     }
 
     def __init__(self, timeout: int = 30):

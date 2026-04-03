@@ -329,14 +329,14 @@ Managed units can also be installed through the OS service adapter:
 
 `afs services render|start|stop|status|restart` now preserve that explicit
 `AFS_CONFIG_PATH` for the spawned service process, so background maintenance can
-stay pinned to a repo-local `.context` such as `/Users/scawful/src/lab/.context`.
+stay pinned to a repo-local `.context` such as `~/src/lab/.context`.
 
 For the built-in `context-warm` and `context-watch` services, you can scope the
 watched/audited contexts declaratively without replacing the whole command:
 
 ```toml
 [services.services.context-watch]
-context_filters = ["/Users/scawful/src/lab"]
+context_filters = ["~/src/lab"]
 ```
 
 `agent-supervisor` is the process reconciler for profile-defined background
@@ -376,7 +376,7 @@ Codex user config:
 
 ```toml
 [mcp_servers.afs]
-command = "/Users/scawful/src/lab/afs/scripts/afs"
+command = "$AFS_ROOT/scripts/afs"
 args = ["mcp", "serve"]
 ```
 
@@ -386,12 +386,12 @@ Claude JSON config:
 {
   "mcpServers": {
     "afs": {
-      "command": "/Users/scawful/src/lab/afs/.venv/bin/python",
+      "command": "$AFS_ROOT/.venv/bin/python",
       "args": ["-m", "afs.mcp_server"],
       "env": {
-        "AFS_ROOT": "/Users/scawful/src/lab/afs",
-        "AFS_VENV": "/Users/scawful/src/lab/afs/.venv",
-        "PYTHONPATH": "/Users/scawful/src/lab/afs/src"
+        "AFS_ROOT": "$AFS_ROOT",
+        "AFS_VENV": "$AFS_ROOT/.venv",
+        "PYTHONPATH": "$AFS_ROOT/src"
       }
     }
   }
@@ -447,7 +447,7 @@ Antigravity raw config example:
 {
   "mcpServers": {
     "afs": {
-      "command": "/Users/scawful/src/lab/afs/scripts/afs",
+      "command": "$AFS_ROOT/scripts/afs",
       "args": ["mcp", "serve"]
     }
   }

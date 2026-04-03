@@ -23,8 +23,8 @@ from .guardrails import ModelRoute
 
 logger = logging.getLogger(__name__)
 
-# Ollama host from nodes.toml — medical-mechanica workstation
-OLLAMA_HOST = "http://100.104.53.21:11434"
+# Ollama host — override with OLLAMA_HOST or AFS_OLLAMA_HOST env var
+OLLAMA_HOST = os.getenv("OLLAMA_HOST") or os.getenv("AFS_OLLAMA_HOST") or "http://localhost:11434"
 
 # Default timeout for all LLM calls (seconds)
 LLM_TIMEOUT = 30

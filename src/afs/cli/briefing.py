@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -20,25 +21,17 @@ from typing import Any
 # Project registry — repos to track
 # ---------------------------------------------------------------------------
 
-PROJECTS: dict[str, dict[str, Any]] = {
-    # Hobby
-    "yaze": {"path": "~/src/hobby/yaze", "category": "hobby"},
-    "oracle-of-secrets": {"path": "~/src/hobby/oracle-of-secrets", "category": "hobby"},
-    "mesen2-oos": {"path": "~/src/hobby/mesen2-oos", "category": "hobby"},
-    "z3dk": {"path": "~/src/hobby/z3dk", "category": "hobby"},
-    # Lab
-    "afs": {"path": "~/src/lab/afs", "category": "lab"},
-    "afs-scawful": {"path": "~/src/lab/afs-scawful", "category": "lab"},
-    "echoflow": {"path": "~/src/lab/echoflow", "category": "lab"},
-    "barista": {"path": "~/src/lab/barista", "category": "lab"},
-    "halext-org": {"path": "~/src/lab/halext-org", "category": "lab"},
-    # Tools
-    "org-sync": {"path": "~/src/tools/org-sync", "category": "tools"},
-    "dotfiles": {"path": "~/src/config/dotfiles", "category": "config"},
-}
+# Populate via AFS_BRIEFING_PROJECTS env var (JSON) or leave empty for auto-discovery.
+# Format: {"name": {"path": "~/src/...", "category": "lab"}, ...}
+PROJECTS: dict[str, dict[str, Any]] = {}
+_projects_env = os.environ.get("AFS_BRIEFING_PROJECTS")
+if _projects_env:
+    try:
+        PROJECTS = json.loads(_projects_env)
+    except json.JSONDecodeError:
+        pass
 
 STALE_THRESHOLD_DAYS = 14
-CLOUD_NEXT_DATE = datetime(2026, 4, 22)
 
 
 # ---------------------------------------------------------------------------
@@ -86,8 +79,8 @@ def _git_last_commit_date(repo_path: Path) -> datetime | None:
 # Halext-org task pull (optional, fails gracefully)
 # ---------------------------------------------------------------------------
 
-def _fetch_halext_tasks() -> list[dict[str, Any]]:
-    """Pull open tasks from halext-org API. Returns [] on failure."""
+def _fetch_tasks() -> list[dict[str, Any]]:
+    """Pull open tasks from task API. Returns [] on failure."""
     try:
         import urllib.request
         req = urllib.request.Request(
@@ -189,11 +182,8 @@ def _build_briefing(days: int = 7, include_gws: bool = True) -> dict[str, Any]:
     # Sort by commit count descending
     velocity = dict(sorted(velocity.items(), key=lambda x: x[1]["commits"], reverse=True))
 
-    # Deadlines
-    days_to_next = (CLOUD_NEXT_DATE - now).days
-
     # Tasks
-    tasks = _fetch_halext_tasks()
+    tasks = _fetch_tasks()
     carry = _latest_weekly_carryover()
     agents = _read_agent_registry()
 
@@ -210,7 +200,6 @@ def _build_briefing(days: int = 7, include_gws: bool = True) -> dict[str, Any]:
 
     return {
         "date": now.strftime("%Y-%m-%d %A"),
-        "cloud_next_days": days_to_next,
         "total_commits_7d": total_commits,
         "velocity": velocity,
         "stale_projects": stale,
@@ -233,12 +222,6 @@ def _render_text(briefing: dict[str, Any], short: bool = False) -> str:
     lines.append(f"=== AFS Morning Briefing — {briefing['date']} ===")
     lines.append("")
 
-    # Countdown
-    d = briefing["cloud_next_days"]
-    if d > 0:
-        lines.append(f"  Cloud Next 2026: {d} days away")
-    elif d == 0:
-        lines.append("  Cloud Next 2026: TODAY")
     lines.append(f"  Total commits (7d): {briefing['total_commits_7d']}")
     if briefing.get("gws_available"):
         lines.append("  Google Workspace: connected")
@@ -303,9 +286,9 @@ def _render_text(briefing: dict[str, Any], short: bool = False) -> str:
             lines.append(f"  {item}")
         lines.append("")
 
-    # Halext tasks
+    # Open tasks
     if briefing["open_tasks"]:
-        lines.append("--- Open Tasks (halext-org) ---")
+        lines.append("--- Open Tasks ---")
         for t in briefing["open_tasks"][:5]:
             title = t.get("title", "untitled")
             priority = t.get("priority", "")
@@ -332,9 +315,6 @@ def _render_org(briefing: dict[str, Any]) -> str:
     lines.append(f"#+TITLE: Morning Briefing — {briefing['date']}")
     lines.append("")
 
-    d = briefing["cloud_next_days"]
-    if d > 0:
-        lines.append(f"*Cloud Next 2026: {d} days*")
     lines.append(f"Total commits (7d): {briefing['total_commits_7d']}")
     lines.append("")
 

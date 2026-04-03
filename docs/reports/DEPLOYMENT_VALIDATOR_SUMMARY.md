@@ -1,6 +1,6 @@
 # DEPLOYMENT_VALIDATOR_SUMMARY.md
 
-This legacy report has been moved to afs-scawful.
+This legacy report has been moved to afs-ext.
 
 Core afs no longer ships domain/model-training report content.
 

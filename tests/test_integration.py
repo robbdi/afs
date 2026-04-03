@@ -47,7 +47,7 @@ try:
     from afs.registry.models import VersionStatus
     from afs.training.pipeline import DataPipeline, PipelineConfig
 except RuntimeError:
-    pytest.skip("afs.training/afs.continuous moved to afs-scawful", allow_module_level=True)
+    pytest.skip("afs.training/afs.continuous moved to afs-ext", allow_module_level=True)
 
 # ============================================================================
 # FIXTURES

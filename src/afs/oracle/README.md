@@ -1,10 +1,10 @@
 # Oracle Domain Modules Moved
 
-The Oracle of Secrets integration package now lives in `afs-scawful`.
+The Oracle of Secrets integration package now lives in `afs-ext`.
 
 Use the extension-owned modules instead:
 
-- `afs_scawful.oracle.orchestrator`
-- `afs_scawful.oracle.testing`
-- `afs_scawful.oracle.tools`
-- `afs_scawful.oracle.embeddings`
+- `afs_ext.oracle.orchestrator`
+- `afs_ext.oracle.testing`
+- `afs_ext.oracle.tools`
+- `afs_ext.oracle.embeddings`

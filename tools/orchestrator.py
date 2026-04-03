@@ -2,7 +2,7 @@
 """
 AFS Orchestrator (Registry Aware)
 The bridge between Cloud Architects and Local Expert Models.
-Dynamically loads agents from afs-scawful/config/chat_registry.toml.
+Dynamically loads agents from the AFS chat registry.
 
 Usage: python3 orchestrator.py --agent <agent_name> --prompt <task_prompt>
 """
@@ -18,7 +18,10 @@ import httpx
 import tomllib
 
 # Paths
-REGISTRY_PATH = Path(os.path.expanduser("~/src/lab/afs-scawful/config/chat_registry.toml"))
+REGISTRY_PATH = Path(
+    os.getenv("AFS_REGISTRY_PATH")
+    or os.path.expanduser("~/.config/afs/chat_registry.toml")
+)
 
 def _env_first(*names: str) -> str:
     for name in names:
@@ -54,7 +57,7 @@ BACKEND_ALIASES = {
     ),
     "lmstudio-remote": BackendOverride(
         provider="studio",
-        base_url=_env_first("LMSTUDIO_REMOTE_BASE_URL") or "http://medical-mechanica:1234/v1",
+        base_url=_env_first("LMSTUDIO_REMOTE_BASE_URL") or "http://localhost:1234/v1",
     ),
     "ollama": BackendOverride(
         provider="ollama",
@@ -62,7 +65,7 @@ BACKEND_ALIASES = {
     ),
     "ollama-remote": BackendOverride(
         provider="ollama",
-        base_url=_env_first("OLLAMA_REMOTE_HOST") or "http://medical-mechanica:11434",
+        base_url=_env_first("OLLAMA_REMOTE_HOST") or "http://localhost:11434",
     ),
     "gateway": BackendOverride(
         provider="openai",

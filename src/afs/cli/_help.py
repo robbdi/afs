@@ -107,7 +107,7 @@ def render_default_help(parser: argparse.ArgumentParser, config: AFSConfig | Non
         _format_list(
             [
                 "Legacy personal/model-training, benchmark, gateway, and Claude commands are extension-owned.",
-                "Enable an extension such as afs-scawful to restore personal/domain command groups.",
+                "Enable an extension plugin to restore domain-specific command groups.",
             ]
         )
     )

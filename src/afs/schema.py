@@ -156,7 +156,7 @@ class PluginsConfig:
     plugin_dirs: list[Path] = field(default_factory=list)
     auto_discover: bool = True
     auto_discover_prefixes: list[str] = field(
-        default_factory=lambda: ["afs_plugin", "afs_scawful"]
+        default_factory=lambda: ["afs_plugin"]
     )
 
     @classmethod

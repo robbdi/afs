@@ -359,5 +359,5 @@ Next steps:
 5. Integrate with your CI/CD pipeline for regression testing
 
 For questions or issues, check the framework source code:
-/Users/scawful/src/lab/afs/src/afs/comparison/framework.py
+$AFS_ROOT/src/afs/comparison/framework.py
 """)

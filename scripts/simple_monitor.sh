@@ -3,7 +3,7 @@
 # Just checks instance status via vastai CLI
 
 INSTANCES="30007012 30007267 30007268 30007269 30007270"
-LOG_FILE="/Users/scawful/.context/training/monitor.log"
+LOG_FILE="${HOME}/.config/afs/training/monitor.log"
 
 echo "=== Training Monitor Started: $(date) ===" >> "$LOG_FILE"
 
@@ -25,7 +25,7 @@ while true; do
         echo "=== ALL TRAINING COMPLETE: $(date) ===" >> "$LOG_FILE"
 
         # Create completion marker
-        echo "$(date)" > /Users/scawful/.context/training/training_complete.marker
+        echo "$(date)" > "${HOME}/.config/afs/training/training_complete.marker"
 
         break
     fi

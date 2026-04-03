@@ -218,7 +218,7 @@ python scripts/cost_report.py --set-budget bert-base 1000.0
 
 ## Examples
 
-See `/Users/scawful/src/lab/afs/docs/COST_OPTIMIZATION.md` for detailed examples.
+See `$AFS_ROOT/docs/COST_OPTIMIZATION.md` for detailed examples.
 
 ## Testing
 

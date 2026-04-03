@@ -20,8 +20,8 @@ from typing import Dict, List, Tuple
 from datetime import datetime
 
 # Configuration
-MODELS_DIR = Path("/Users/scawful/src/lab/afs/models")
-TRAINING_DIR = Path("/Users/scawful/.context/training")
+MODELS_DIR = Path(os.environ.get("AFS_MODELS_DIR", "models"))
+TRAINING_DIR = Path(os.environ.get("AFS_TRAINING_DIR", "training_data"))
 
 # Quality threshold (set to 0.0 to include all samples, including those with no score)
 MIN_QUALITY_SCORE = 0.0

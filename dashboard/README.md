@@ -52,7 +52,7 @@ Real-time web dashboard for monitoring AFS training system progress, costs, and 
 
 1. **Navigate to dashboard directory:**
    ```bash
-   cd /Users/scawful/src/lab/afs/dashboard
+   cd $AFS_ROOT/dashboard
    ```
 
 2. **Run the launch script:**
@@ -261,7 +261,7 @@ Flask-CORS is enabled. If still seeing errors, check:
 1. Check server is running: `ps aux | grep api.py`
 2. Check API responds: `curl http://localhost:5000/api/health`
 3. Check browser console for errors: `F12 → Console`
-4. Verify data files exist: `ls /Users/scawful/src/lab/afs/models/`
+4. Verify data files exist: `ls $AFS_ROOT/models/`
 
 ### Charts Not Loading
 - Clear browser cache (Ctrl+Shift+Delete / Cmd+Shift+Delete)
@@ -319,7 +319,7 @@ Edit `app.js` Chart.js configuration options
 ## File Structure
 
 ```
-/Users/scawful/src/lab/afs/dashboard/
+$AFS_ROOT/dashboard/
 ├── index.html          # Main dashboard HTML
 ├── app.js             # Frontend logic & Chart.js integration
 ├── styles.css         # All styling (dark/light modes)

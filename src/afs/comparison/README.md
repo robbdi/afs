@@ -415,10 +415,10 @@ See `examples/comparison_custom_scorer.py` for examples.
 
 ## References
 
-- **Framework Code**: `/Users/scawful/src/lab/afs/src/afs/comparison/framework.py`
-- **CLI Commands**: `/Users/scawful/src/lab/afs/src/afs/cli/comparison.py`
-- **Tutorial**: `/Users/scawful/src/lab/afs/examples/comparison_tutorial.py`
-- **Full Documentation**: `/Users/scawful/src/lab/afs/docs/COMPARISON_FRAMEWORK.md`
+- **Framework Code**: `$AFS_ROOT/src/afs/comparison/framework.py`
+- **CLI Commands**: `$AFS_ROOT/src/afs/cli/comparison.py`
+- **Tutorial**: `$AFS_ROOT/examples/comparison_tutorial.py`
+- **Full Documentation**: `$AFS_ROOT/docs/COMPARISON_FRAMEWORK.md`
 
 ## License
 

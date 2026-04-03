@@ -144,8 +144,8 @@ After=network-online.target
 
 [Service]
 Type=simple
-User=scawful
-WorkingDirectory=/Users/scawful/src/lab/afs
+User=$USER
+WorkingDirectory=$AFS_ROOT
 ExecStart=/usr/bin/python3 scripts/training_monitor_tui.py --instances 30007012,30007267,30007268,30007269,30007270 --interval 10
 Restart=always
 RestartSec=10

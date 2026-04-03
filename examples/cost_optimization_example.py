@@ -349,8 +349,8 @@ def main():
     print("=" * 70)
     print(
         "\nFor more information, see:"
-        "\n  - /Users/scawful/src/lab/afs/docs/COST_OPTIMIZATION.md"
-        "\n  - /Users/scawful/src/lab/afs/src/afs/cost/README.md"
+        "\n  - $AFS_ROOT/docs/COST_OPTIMIZATION.md"
+        "\n  - $AFS_ROOT/src/afs/cost/README.md"
         "\n"
     )
 

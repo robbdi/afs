@@ -12,7 +12,7 @@ try:
     from afs.training.pipeline import DataPipeline, PipelineConfig
     from afs.training.rehearsal import RehearsalBuffer, RehearsalBufferConfig
 except RuntimeError:
-    pytest.skip("afs.training moved to afs-scawful", allow_module_level=True)
+    pytest.skip("afs.training moved to afs-ext", allow_module_level=True)
 
 
 class TestTrainingSample:

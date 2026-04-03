@@ -81,4 +81,4 @@ AFS extension points are explicit:
 ## Scope Boundary
 
 Core AFS docs and code avoid domain-specific model-training/persona workflows.
-Those belong in `lab/afs-scawful`.
+Those belong in `lab/afs-ext`.

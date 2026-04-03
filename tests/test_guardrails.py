@@ -465,7 +465,7 @@ class TestFileLocking:
 class TestLaunchAgentPlist:
     def test_plist_is_valid_xml(self) -> None:
         import xml.etree.ElementTree as ET
-        plist_path = Path(__file__).parent.parent / "scripts" / "com.halext.afs-supervisor.plist"
+        plist_path = Path(__file__).parent.parent / "scripts" / "com.afs.supervisor.plist"
         if not plist_path.exists():
             pytest.skip("plist not found")
         tree = ET.parse(str(plist_path))
@@ -474,12 +474,12 @@ class TestLaunchAgentPlist:
 
     def test_plist_has_required_keys(self) -> None:
         import plistlib
-        plist_path = Path(__file__).parent.parent / "scripts" / "com.halext.afs-supervisor.plist"
+        plist_path = Path(__file__).parent.parent / "scripts" / "com.afs.supervisor.plist"
         if not plist_path.exists():
             pytest.skip("plist not found")
         with open(plist_path, "rb") as f:
             data = plistlib.load(f)
-        assert data["Label"] == "com.halext.afs-supervisor"
+        assert data["Label"] == "com.afs.supervisor"
         assert "ProgramArguments" in data
         assert "StartInterval" in data
         assert data["StartInterval"] == 900

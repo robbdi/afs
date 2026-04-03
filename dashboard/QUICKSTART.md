@@ -3,7 +3,7 @@
 ## 30-Second Setup
 
 ```bash
-cd /Users/scawful/src/lab/afs/dashboard
+cd $AFS_ROOT/dashboard
 ./serve.sh
 ```
 
@@ -158,7 +158,7 @@ pip install flask flask-cors
 ### "No data showing"
 1. Verify model files exist:
    ```bash
-   ls /Users/scawful/src/lab/afs/models/*merged.jsonl
+   ls $AFS_ROOT/models/*merged.jsonl
    ```
 2. Check API health:
    ```bash

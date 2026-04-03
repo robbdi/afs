@@ -22,7 +22,7 @@ try:
     )
     from afs.generators.base import TrainingSample
 except RuntimeError:
-    pytest.skip("afs.generators.asm_augment moved to afs-scawful", allow_module_level=True)
+    pytest.skip("afs.generators.asm_augment moved to afs-ext", allow_module_level=True)
 
 
 class TestCategoryDetection:

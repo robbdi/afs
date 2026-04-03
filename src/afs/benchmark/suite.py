@@ -104,7 +104,7 @@ class BenchmarkSuite:
 
         for domain in domains:
             if domain not in runners:
-                print(f"Skipping {domain}: runner not available (install afs-scawful)")
+                print(f"Skipping {domain}: runner not available (install afs-ext)")
                 continue
 
             config = self._get_config(domain)

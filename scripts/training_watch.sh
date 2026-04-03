@@ -19,7 +19,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AFS_ROOT="${AFS_ROOT:-$(dirname "$SCRIPT_DIR")}"
 TRAINING_ROOT="${TRAINING_ROOT:-$HOME/src/training}"
-QA_SCRIPT="${QA_SCRIPT:-$HOME/src/lab/afs-scawful/scripts/dataset_qa_summary.py}"
+QA_SCRIPT="${QA_SCRIPT:-$AFS_ROOT/scripts/dataset_qa_summary.py}"
 DEBOUNCE="30"
 
 if [[ "${1:-}" == "--debounce" ]] && [[ -n "${2:-}" ]]; then
@@ -42,13 +42,13 @@ echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) Training data changed, running QA..."
 python3 -c "
 from pathlib import Path
 try:
-    from afs_scawful.registry import build_dataset_registry, write_dataset_registry
+    from afs.training.registry import build_dataset_registry, write_dataset_registry
     root = Path('$TRAINING_ROOT')
     registry = build_dataset_registry(root)
     write_dataset_registry(registry, root / 'registry.json')
     print(f'Registry rebuilt: {len(registry)} datasets')
 except ImportError:
-    print('afs_scawful.registry not available, skipping registry rebuild')
+    print('afs.training.registry not available, skipping registry rebuild')
 except Exception as e:
     print(f'Registry rebuild error: {e}')
 " 2>&1 || true

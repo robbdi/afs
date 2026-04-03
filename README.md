@@ -45,7 +45,7 @@ Run the MCP server for Gemini/other MCP clients:
 # or, after installing the package into the active environment
 afs mcp serve
 # for Claude Desktop, prefer the direct venv module entrypoint
-/Users/scawful/src/lab/afs/.venv/bin/python -m afs.mcp_server
+$AFS_ROOT/.venv/bin/python -m afs.mcp_server
 ```
 
 For Claude Desktop MCP registration, prefer the direct Python module entrypoint
@@ -193,19 +193,9 @@ These cover pre-training freshness checks, extraction of training samples from
 recorded AFS sessions, router-dataset generation from declared agent
 capabilities, and an optional watch wrapper for local dataset QA workflows.
 
-## AFS Studio variants
+## Extensions
 
-There are two "AFS Studio" implementations:
-
-- **Python TUI (this repo):** Run with `afs-studio` (shell function in `config/dotfiles/zsh/65-afs.zsh`) or `python -m afs studio run --build` from `lab/afs`. Best for development and context-heavy workflows.
-- **C++ ImGui (afs_suite):** Built from `lab/afs_suite/apps/studio/`. Launched via the unified `afs` CLI (`afs studio` or `afs launch afs_studio`) and from Barista (⌘⌥S). Defined in `shared/cpp/afs_core/resources/afs_apps.json`. Best for a standalone desktop operations app.
-
-The unified CLI in `tools/afs/` uses the manifest for app launch; "studio" there always means the C++ app. Use the shell function `afs-studio` for the Python TUI.
-
-## lab/afs vs lab/afs-scawful
-
-- **lab/afs** — Core research prototype: orchestration, context mounts, Python CLI and TUI. Shared upstream-friendly code.
-- **lab/afs-scawful** — Personal fork: scripts (e.g. afs-studio wrappers, afs-warm), policies, agent instructions, chat registry, persona gateway, and MoE/orchestration surfaces. Overrides and machine-specific config live here; the AFS CLI and Barista can read from it for "my defaults."
+Domain-specific functionality (model training, persona configurations, deployment playbooks) can be added via extension plugins. See `docs/EXTENSION_MIGRATION.md` for the extension layout.
 
 ## Documentation
 

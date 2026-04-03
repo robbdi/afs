@@ -42,11 +42,11 @@ def _load_agents() -> dict:
         _AGENTS_CACHE = agents
     return _AGENTS_CACHE
 
-# Remote inference configuration
+# Remote inference configuration — override hosts via environment variables
 REMOTE_BACKENDS = {
-    "medical-mechanica": {
-        "host": "http://medical-mechanica:1234",
-        "description": "Windows RTX machine via Tailscale",
+    "gpu": {
+        "host": os.environ.get("AFS_GPU_HOST", "http://localhost:1234"),
+        "description": "Remote GPU node for inference",
     },
     "vast": {
         "host": None,  # Set dynamically when spinning up instance
@@ -55,22 +55,8 @@ REMOTE_BACKENDS = {
 }
 
 def get_lmstudio_host() -> str:
-    """Get the LMStudio host, checking remote first."""
-    remote = os.environ.get("LMSTUDIO_HOST")
-    if remote:
-        return remote
-    # Check if medical-mechanica is available
-    import socket
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(2)
-        result = sock.connect_ex(("medical-mechanica", 1234))
-        sock.close()
-        if result == 0:
-            return "http://medical-mechanica:1234"
-    except:
-        pass
-    return "http://localhost:1234"
+    """Get the LMStudio host from env or default to localhost."""
+    return os.environ.get("LMSTUDIO_HOST") or "http://localhost:1234"
 
 
 def _lmstudio_base_url(remote: bool = False) -> str:
@@ -237,7 +223,7 @@ def get_agent_for_expert(expert: str, prefer_ollama: bool = False, prefer_lmstud
         prefer_ollama: If True, prefer Ollama versions (for remote ollama)
         prefer_lmstudio: If True, prefer LMStudio versions (for remote lmstudio)
     """
-    # Ollama agents (work with remote ollama on medical-mechanica)
+    # Ollama agents
     ollama_map = {
         "nayru": "nayru",
         "din": "din",           # din-v2:latest on ollama
@@ -267,7 +253,7 @@ def get_agent_for_expert(expert: str, prefer_ollama: bool = False, prefer_lmstud
 
 def call_expert(expert: str, prompt: str, verbose: bool = False, remote: bool = False) -> str:
     """Call the expert agent with the prompt."""
-    # For remote, prefer LMStudio agents since that's what's on medical-mechanica
+    # For remote, prefer LMStudio agents
     agent_name = get_agent_for_expert(expert, prefer_lmstudio=True)
 
     agents = _load_agents()
@@ -367,7 +353,7 @@ Examples:
     parser.add_argument("--auto", action="store_true", help="Interactive mode")
     parser.add_argument("--analyze", help="Show routing analysis without calling expert")
     parser.add_argument("--no-model-router", action="store_true", help="Use keyword routing only")
-    parser.add_argument("--remote", "-r", action="store_true", help="Use remote backend (medical-mechanica)")
+    parser.add_argument("--remote", "-r", action="store_true", help="Use remote backend")
 
     args = parser.parse_args()
 

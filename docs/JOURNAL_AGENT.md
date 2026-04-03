@@ -92,7 +92,7 @@ Example stale entry:
 
 ```org
 #+TITLE: Weekly Review — 2026-W12 (Mar 10–16)
-#+AUTHOR: Justin Scofield
+#+AUTHOR: AFS
 
 * Wins
 - ...

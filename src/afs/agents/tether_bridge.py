@@ -2,7 +2,7 @@
 
 Converts workspace-analyst findings, mission results, and pending approvals
 into structured capture items compatible with Tether's Entry model. Supports
-file-based JSON handoff, tether:// deep links, and optional halext-org API push.
+file-based JSON handoff, tether:// deep links, and optional task API API push.
 """
 
 from __future__ import annotations
@@ -39,8 +39,8 @@ DEFAULT_CAPTURES_PATH = Path("~/.config/afs/agents/tether_captures.json")
 # Tether URL scheme (iOS deep links)
 TETHER_SCHEME = "tether"
 
-# halext-org API default
-HALEXT_API_DEFAULT = "https://org.halext.org/api"
+# External task API — override with AFS_TASK_API_URL env var
+TASK_API_DEFAULT = os.getenv("AFS_TASK_API_URL") or "http://localhost:8000/api"
 
 
 # ---------------------------------------------------------------------------
@@ -259,22 +259,22 @@ def write_captures_file(
 
 
 # ---------------------------------------------------------------------------
-# Output: halext-org API push (optional, best-effort)
+# Output: task API API push (optional, best-effort)
 # ---------------------------------------------------------------------------
 
-def push_to_halext(
+def push_to_task_api(
     captures: list[dict[str, Any]],
     *,
-    api_url: str = HALEXT_API_DEFAULT,
+    api_url: str = TASK_API_DEFAULT,
     token: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Push captures as todos to halext-org REST API.
+    """Push captures as todos to task API REST API.
 
     Returns list of created task dicts (empty on failure).
     This is best-effort; network errors are logged but not raised.
     """
     if not token:
-        logger.debug("No halext-org token; skipping API push")
+        logger.debug("No task API token; skipping API push")
         return []
 
     import urllib.request
@@ -301,9 +301,9 @@ def push_to_halext(
                 result = json.loads(resp.read())
                 created.append(result)
         except Exception as exc:
-            logger.warning("Failed to push capture '%s' to halext-org: %s", capture["title"], exc)
+            logger.warning("Failed to push capture '%s' to task API: %s", capture["title"], exc)
 
-    logger.info("Pushed %d/%d captures to halext-org", len(created), len(captures))
+    logger.info("Pushed %d/%d captures to task API", len(created), len(captures))
     return created
 
 
@@ -389,13 +389,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory containing agent report JSON files.",
     )
     parser.add_argument(
-        "--halext-token",
-        help="Bearer token for halext-org API (optional).",
+        "--task-api-token",
+        help="Bearer token for task API API (optional).",
     )
     parser.add_argument(
-        "--halext-url",
-        default=HALEXT_API_DEFAULT,
-        help="halext-org API base URL (default: %(default)s).",
+        "--task-api-url",
+        default=TASK_API_DEFAULT,
+        help="task API API base URL (default: %(default)s).",
     )
     parser.add_argument(
         "--dry-run",
@@ -426,15 +426,15 @@ def run(args: argparse.Namespace) -> int:
         write_captures_file(captures, captures_path)
         captures_written = True
 
-    # 4. Push to halext-org (best-effort)
-    halext_pushed = 0
-    if not args.dry_run and args.halext_token and captures:
-        pushed = push_to_halext(
+    # 4. Push to task API (best-effort)
+    api_pushed = 0
+    if not args.dry_run and args.task_api_token and captures:
+        pushed = push_to_task_api(
             captures,
-            api_url=args.halext_url,
-            token=args.halext_token,
+            api_url=args.task_api_url,
+            token=args.task_api_token,
         )
-        halext_pushed = len(pushed)
+        api_pushed = len(pushed)
 
     finished_at = now_iso()
     duration = time.monotonic() - start
@@ -455,7 +455,7 @@ def run(args: argparse.Namespace) -> int:
         metrics={
             "findings_read": len(findings),
             "captures_generated": len(captures),
-            "halext_pushed": halext_pushed,
+            "api_pushed": api_pushed,
             "priority_high": priority_counts["high"],
             "priority_medium": priority_counts["medium"],
             "priority_low": priority_counts["low"],

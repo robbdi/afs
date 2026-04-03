@@ -24,10 +24,10 @@ def test_core_knowledge_graph_stays_in_core() -> None:
 def test_zelda_entity_extractor_is_extension_owned() -> None:
     sys.modules.pop("afs.knowledge.entity_extractor", None)
 
-    if _has_extension("afs_scawful.knowledge"):
+    if _has_extension("afs_ext.knowledge"):
         module = importlib.import_module("afs.knowledge.entity_extractor")
         assert hasattr(module, "EntityExtractor")
         return
 
-    with pytest.raises(RuntimeError, match="afs-scawful extension"):
+    with pytest.raises(RuntimeError, match="afs-ext extension"):
         importlib.import_module("afs.knowledge.entity_extractor")

@@ -411,9 +411,9 @@ Overview of all deliverables and design decisions
 ## Support & Maintenance
 
 **Documentation maintained at:**
-- `/Users/scawful/src/lab/afs/scripts/DEPLOYMENT.md`
-- `/Users/scawful/src/lab/afs/scripts/ARCHITECTURE.md`
-- `/Users/scawful/src/lab/afs/scripts/QUICKSTART.md`
+- `$AFS_ROOT/scripts/DEPLOYMENT.md`
+- `$AFS_ROOT/scripts/ARCHITECTURE.md`
+- `$AFS_ROOT/scripts/QUICKSTART.md`
 
 **Log files for troubleshooting:**
 - `.logs/pipeline.log` - Complete execution log

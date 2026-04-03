@@ -232,7 +232,7 @@ deployment report
 ## File Organization
 
 ```
-/Users/scawful/src/lab/afs/
+$AFS_ROOT/
 │
 ├── scripts/
 │   ├── deployment_config.yaml          [Configuration]

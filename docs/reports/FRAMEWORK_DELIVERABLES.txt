@@ -279,31 +279,31 @@ KEY FILES REFERENCE
 ================================================================================
 
 Framework Implementation:
-  /Users/scawful/src/lab/afs/src/afs/comparison/framework.py
+  $AFS_ROOT/src/afs/comparison/framework.py
 
 CLI Commands:
-  /Users/scawful/src/lab/afs/src/afs/cli/comparison.py
+  $AFS_ROOT/src/afs/cli/comparison.py
 
 Module Exports:
-  /Users/scawful/src/lab/afs/src/afs/comparison/__init__.py
+  $AFS_ROOT/src/afs/comparison/__init__.py
 
 User Guide:
-  /Users/scawful/src/lab/afs/docs/COMPARISON_FRAMEWORK.md
+  $AFS_ROOT/docs/COMPARISON_FRAMEWORK.md
 
 Technical Reference:
-  /Users/scawful/src/lab/afs/src/afs/comparison/README.md
+  $AFS_ROOT/src/afs/comparison/README.md
 
 Quick Start:
-  /Users/scawful/src/lab/afs/QUICKSTART_COMPARISON.md
+  $AFS_ROOT/QUICKSTART_COMPARISON.md
 
 Examples:
-  /Users/scawful/src/lab/afs/examples/comparison_tutorial.py
+  $AFS_ROOT/examples/comparison_tutorial.py
 
 Implementation Summary:
-  /Users/scawful/src/lab/afs/COMPARISON_FRAMEWORK_SUMMARY.md
+  $AFS_ROOT/COMPARISON_FRAMEWORK_SUMMARY.md
 
 This File:
-  /Users/scawful/src/lab/afs/FRAMEWORK_DELIVERABLES.txt
+  $AFS_ROOT/FRAMEWORK_DELIVERABLES.txt
 
 ================================================================================
 NEXT STEPS

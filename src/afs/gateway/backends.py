@@ -80,7 +80,7 @@ class BackendManager:
                 type=BackendType.WINDOWS,
                 host="localhost",
                 port=11435,  # SSH tunnel from Windows
-                ssh_host="halext-nj",
+                ssh_host="",
                 priority=2,
             ),
             BackendConfig(

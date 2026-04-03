@@ -74,12 +74,12 @@ Add to `~/.claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "afs": {
-      "command": "/Users/scawful/src/lab/afs/.venv/bin/python",
+      "command": "$AFS_ROOT/.venv/bin/python",
       "args": ["-m", "afs.mcp_server"],
       "env": {
-        "AFS_ROOT": "/Users/scawful/src/lab/afs",
-        "AFS_VENV": "/Users/scawful/src/lab/afs/.venv",
-        "PYTHONPATH": "/Users/scawful/src/lab/afs/src"
+        "AFS_ROOT": "$AFS_ROOT",
+        "AFS_VENV": "$AFS_ROOT/.venv",
+        "PYTHONPATH": "$AFS_ROOT/src"
       }
     }
   }

@@ -13,7 +13,7 @@ Before major work:
 ## Context
 
 - Project: afs
-- Context path: /Users/scawful/src/lab/afs/.context
+- Context path: $AFS_ROOT/.context
 
 ## Session Recovery
 

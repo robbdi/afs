@@ -659,8 +659,8 @@ After=network-online.target
 
 [Service]
 Type=simple
-User=scawful
-WorkingDirectory=/Users/scawful/src/lab/afs
+User=$USER
+WorkingDirectory=$AFS_ROOT
 ExecStart=/usr/bin/python3 scripts/training_monitor_tui.py --all
 Restart=always
 

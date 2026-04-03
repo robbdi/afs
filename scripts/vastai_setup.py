@@ -224,7 +224,7 @@ class VastAIManager:
         # Commands to run on instance startup
         commands = [
             "cd /workspace",
-            "git clone https://github.com/scawful/afs.git || true",
+            f"git clone {os.environ.get('AFS_GIT_URL', 'https://github.com/scawful/afs.git')} || true",
             "cd afs",
             "git pull",
             f"pip install -e .",

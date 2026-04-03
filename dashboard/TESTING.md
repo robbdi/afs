@@ -6,7 +6,7 @@
 
 ```bash
 # Start the server first
-cd /Users/scawful/src/lab/afs/dashboard
+cd $AFS_ROOT/dashboard
 python3 api.py &
 
 # In another terminal, test endpoints
