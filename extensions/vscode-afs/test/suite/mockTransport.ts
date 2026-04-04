@@ -25,12 +25,15 @@ class SimpleEventEmitter<T> {
 
 export class MockTransport implements ITransportClient {
   private ready = true;
+  private turnCounter = 0;
   private _onConnectionStateChanged = new SimpleEventEmitter<ConnectionState>();
   readonly onConnectionStateChanged = this._onConnectionStateChanged.event;
 
   public toolResponses: Record<string, Record<string, unknown>> = {};
+  public toolErrors: Record<string, Error> = {};
   public resourceList: McpResource[] = [];
   public promptList: McpPrompt[] = [];
+  public turnEvents: Array<Record<string, unknown>> = [];
 
   async initialize(): Promise<void> {
     this.ready = true;
@@ -48,6 +51,9 @@ export class MockTransport implements ITransportClient {
     name: string,
     _args: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
+    if (this.toolErrors[name]) {
+      throw this.toolErrors[name];
+    }
     return this.toolResponses[name] ?? {};
   }
 
@@ -69,6 +75,26 @@ export class MockTransport implements ITransportClient {
 
   async getPrompt(_name: string): Promise<McpPromptMessage[]> {
     return [];
+  }
+
+  async beginTurn(prompt: string, summary?: string): Promise<string> {
+    this.turnCounter += 1;
+    const turnId = `mock-turn-${this.turnCounter}`;
+    this.turnEvents.push({ event: "begin", turnId, prompt, summary: summary ?? "" });
+    return turnId;
+  }
+
+  async completeTurn(turnId: string, summary?: string): Promise<void> {
+    this.turnEvents.push({ event: "complete", turnId, summary: summary ?? "" });
+  }
+
+  async failTurn(turnId: string, error: unknown, summary?: string): Promise<void> {
+    this.turnEvents.push({
+      event: "fail",
+      turnId,
+      summary: summary ?? "",
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 
   dispose(): void {

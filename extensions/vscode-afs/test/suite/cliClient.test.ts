@@ -29,6 +29,7 @@ fs.appendFileSync(
       AFS_SESSION_CLIENT_PAYLOAD_JSON: process.env.AFS_SESSION_CLIENT_PAYLOAD_JSON || "",
       AFS_SESSION_SYSTEM_PROMPT_JSON: process.env.AFS_SESSION_SYSTEM_PROMPT_JSON || "",
       AFS_SESSION_SYSTEM_PROMPT_TEXT: process.env.AFS_SESSION_SYSTEM_PROMPT_TEXT || "",
+      AFS_SESSION_DEFAULT_TURN_ID: process.env.AFS_SESSION_DEFAULT_TURN_ID || "",
       AFS_ACTIVE_CONTEXT_ROOT: process.env.AFS_ACTIVE_CONTEXT_ROOT || "",
     },
   }) + "\\n",
@@ -141,6 +142,89 @@ describe("CliClient", () => {
     assert.strictEqual(fsReadCall.env.AFS_SESSION_SYSTEM_PROMPT_JSON, path.join(tmpDir, "session_system_prompt_vscode.json"));
     assert.strictEqual(fsReadCall.env.AFS_SESSION_SYSTEM_PROMPT_TEXT, path.join(tmpDir, "session_system_prompt_vscode.txt"));
     assert.strictEqual(fsReadCall.env.AFS_ACTIVE_CONTEXT_ROOT, path.join(tmpDir, "workspace", ".context"));
+  });
+
+  it("records turn events and carries the active turn into nested tool calls", async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "afs-cli-client-turn-"));
+    const logPath = path.join(tmpDir, "cli.log");
+    const workspaceRoot = path.join(tmpDir, "workspace");
+    const notePath = path.join(workspaceRoot, ".context", "scratchpad", "note.md");
+    fs.mkdirSync(path.dirname(notePath), { recursive: true });
+    fs.writeFileSync(notePath, "", "utf-8");
+    workspace.workspaceFolders = [{ uri: { fsPath: workspaceRoot } }];
+
+    const client = new CliClient(
+      writeFakeAfsBinary(tmpDir, logPath),
+      [],
+      {
+        CLI_TEST_LOG: logPath,
+        CLI_TEST_ROOT: tmpDir,
+      },
+      {
+        appendLine() {},
+        dispose() {},
+      } as never,
+      5_000,
+    );
+
+    await client.initialize();
+    const turnId = await client.beginTurn("Inspect scratchpad note", "Search AFS context index");
+    const result = await client.callTool("context.read", { path: notePath });
+    assert.deepStrictEqual(result, { path: notePath, content: "from-context" });
+    await client.completeTurn(turnId, "Context query returned 1 result(s)");
+    client.dispose();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const calls = readLogEntries(logPath);
+    const fsReadCall = calls.find((entry) => entry.args[0] === "fs" && entry.args[1] === "read");
+    assert.ok(fsReadCall);
+    assert.strictEqual(fsReadCall.env.AFS_SESSION_DEFAULT_TURN_ID, turnId);
+    assert.ok(
+      calls.some(
+        (entry) =>
+          entry.args[0] === "session" &&
+          entry.args[1] === "event" &&
+          entry.args[2] === "user_prompt_submit" &&
+          entry.args.includes("--turn-id") &&
+          entry.args.includes(turnId),
+      ),
+    );
+    assert.ok(
+      calls.some(
+        (entry) =>
+          entry.args[0] === "session" &&
+          entry.args[1] === "event" &&
+          entry.args[2] === "turn_started" &&
+          entry.args.includes(turnId),
+      ),
+    );
+    assert.ok(
+      calls.some(
+        (entry) =>
+          entry.args[0] === "session" &&
+          entry.args[1] === "event" &&
+          entry.args[2] === "task_created" &&
+          entry.args.includes(turnId),
+      ),
+    );
+    assert.ok(
+      calls.some(
+        (entry) =>
+          entry.args[0] === "session" &&
+          entry.args[1] === "event" &&
+          entry.args[2] === "task_completed" &&
+          entry.args.includes(turnId),
+      ),
+    );
+    assert.ok(
+      calls.some(
+        (entry) =>
+          entry.args[0] === "session" &&
+          entry.args[1] === "event" &&
+          entry.args[2] === "turn_completed" &&
+          entry.args.includes(turnId),
+      ),
+    );
   });
 
   it("emits task_failed when the CLI command errors", async () => {

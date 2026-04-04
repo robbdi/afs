@@ -1,4 +1,6 @@
-import { ChildProcess, spawn } from "child_process";
+import { ChildProcess, execFile, spawn } from "child_process";
+import { randomUUID } from "crypto";
+import * as path from "path";
 import * as vscode from "vscode";
 import { MCP_PROTOCOL_VERSION } from "../constants";
 import type {
@@ -17,6 +19,10 @@ interface PendingRequest {
   timer: ReturnType<typeof setTimeout>;
 }
 
+interface ExecCliOptions {
+  includeSessionEnv?: boolean;
+}
+
 export class McpStdioClient implements ITransportClient {
   private process: ChildProcess | null = null;
   private nextId = 1;
@@ -24,22 +30,34 @@ export class McpStdioClient implements ITransportClient {
   private buffer = Buffer.alloc(0);
   private ready = false;
   private caps: ServerCapabilities = { tools: false, resources: false, prompts: false };
+  private sessionId = "";
+  private sessionPayloadFile = "";
+  private sessionContextPath = "";
+  private sessionPromptJson = "";
+  private sessionPromptText = "";
+  private sessionWorkspace = "";
+  private toolTaskCounter = 0;
+  private turnCounter = 0;
+  private activeTurnId = "";
 
   private readonly _onConnectionStateChanged = new vscode.EventEmitter<ConnectionState>();
   readonly onConnectionStateChanged = this._onConnectionStateChanged.event;
 
   constructor(
     private readonly command: string,
-    private readonly args: string[],
+    private readonly cliArgs: string[],
+    private readonly mcpArgs: string[],
     private readonly env: Record<string, string>,
     private readonly logger: vscode.OutputChannel,
     private readonly timeout: number = 30_000,
   ) {}
 
   async initialize(): Promise<void> {
-    this.process = spawn(this.command, this.args, {
+    await this.ensureSessionHarness();
+
+    this.process = spawn(this.command, this.mcpArgs, {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, ...this.env },
+      env: { ...process.env, ...this.env, ...this.sessionEnv() },
     });
 
     this.process.stdout!.on("data", (chunk: Buffer) => this.onData(chunk));
@@ -90,16 +108,32 @@ export class McpStdioClient implements ITransportClient {
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const resp = await this.sendRequest("tools/call", { name, arguments: args });
-    if (resp.error) {
-      throw new Error(resp.error.message);
+    await this.ensureSessionHarness();
+    const taskId = this.nextTaskId();
+    await this.recordToolEvent("task_created", name, taskId, `MCP tool started: ${name}`, "running");
+    try {
+      const resp = await this.sendRequest("tools/call", { name, arguments: args });
+      if (resp.error) {
+        throw new Error(resp.error.message);
+      }
+      const result = resp.result ?? {};
+      await this.recordToolEvent(
+        "task_completed",
+        name,
+        taskId,
+        `MCP tool completed: ${name}`,
+        "completed",
+      );
+      // Extract structuredContent if present (AFS wraps tool results)
+      if ("structuredContent" in result && typeof result.structuredContent === "object") {
+        return result.structuredContent as Record<string, unknown>;
+      }
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await this.recordToolEvent("task_failed", name, taskId, message, "failed", message);
+      throw err;
     }
-    const result = resp.result ?? {};
-    // Extract structuredContent if present (AFS wraps tool results)
-    if ("structuredContent" in result && typeof result.structuredContent === "object") {
-      return result.structuredContent as Record<string, unknown>;
-    }
-    return result;
   }
 
   async listTools(): Promise<ToolSpec[]> {
@@ -140,7 +174,99 @@ export class McpStdioClient implements ITransportClient {
     return ((resp.result as Record<string, unknown>)?.messages ?? []) as McpPromptMessage[];
   }
 
+  async beginTurn(prompt: string, summary?: string): Promise<string> {
+    await this.ensureSessionHarness();
+    if (!this.sessionId) {
+      return "";
+    }
+
+    const turnId = this.nextTurnId();
+    const promptText = prompt.trim();
+    const turnSummary = ((summary ?? promptText) || "VS Code command").trim();
+    try {
+      await this.runSessionEvent("user_prompt_submit", [
+        "--turn-id",
+        turnId,
+        "--prompt",
+        promptText || prompt,
+      ]);
+      this.activeTurnId = turnId;
+      const args = ["--turn-id", turnId];
+      if (turnSummary) {
+        args.push("--summary", turnSummary);
+      }
+      await this.runSessionEvent("turn_started", args);
+      return turnId;
+    } catch (err) {
+      this.activeTurnId = "";
+      this.logger.appendLine(`[mcp harness] beginTurn failed: ${err}`);
+      return "";
+    }
+  }
+
+  async completeTurn(turnId: string, summary?: string): Promise<void> {
+    if (!turnId) {
+      return;
+    }
+    try {
+      const args = ["--turn-id", turnId];
+      if (summary?.trim()) {
+        args.push("--summary", summary.trim());
+      }
+      args.push("--reason", "vscode_command");
+      await this.runSessionEvent("turn_completed", args);
+    } catch (err) {
+      this.logger.appendLine(`[mcp harness] completeTurn failed: ${err}`);
+    } finally {
+      if (this.activeTurnId === turnId) {
+        this.activeTurnId = "";
+      }
+    }
+  }
+
+  async failTurn(turnId: string, error: unknown, summary?: string): Promise<void> {
+    if (!turnId) {
+      return;
+    }
+    try {
+      const args = ["--turn-id", turnId];
+      if (summary?.trim()) {
+        args.push("--summary", summary.trim());
+      }
+      const reason = error instanceof Error ? error.message : String(error);
+      if (reason.trim()) {
+        args.push("--reason", reason.trim());
+      }
+      await this.runSessionEvent("turn_failed", args);
+    } catch (err) {
+      this.logger.appendLine(`[mcp harness] failTurn failed: ${err}`);
+    } finally {
+      if (this.activeTurnId === turnId) {
+        this.activeTurnId = "";
+      }
+    }
+  }
+
   dispose(): void {
+    if (this.activeTurnId) {
+      const turnId = this.activeTurnId;
+      this.activeTurnId = "";
+      void this.runSessionEvent("turn_failed", [
+        "--turn-id",
+        turnId,
+        "--summary",
+        "VS Code command interrupted by client dispose",
+        "--reason",
+        "client_dispose",
+      ]).catch((err) => {
+        this.logger.appendLine(`[mcp harness] turn_failed failed: ${err}`);
+      });
+    }
+    if (this.sessionId) {
+      void this.runSessionHook("session_end", ["--reason", "client_dispose"]).catch((err) => {
+        this.logger.appendLine(`[mcp harness] session_end failed: ${err}`);
+      });
+    }
     this.rejectAll(new Error("Client disposed"));
     if (this.process) {
       this.process.kill();
@@ -151,6 +277,224 @@ export class McpStdioClient implements ITransportClient {
   }
 
   // --- Private ---
+
+  private workspaceRoot(): string {
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    return folder?.uri?.fsPath ? path.resolve(folder.uri.fsPath) : process.cwd();
+  }
+
+  private nextTaskId(): string {
+    this.toolTaskCounter += 1;
+    return `vscode-tool-${this.toolTaskCounter}`;
+  }
+
+  private nextTurnId(): string {
+    this.turnCounter += 1;
+    return `vscode-turn-${this.turnCounter}`;
+  }
+
+  private sessionEnv(): Record<string, string> {
+    const env: Record<string, string> = {};
+    if (this.sessionId) env.AFS_SESSION_ID = this.sessionId;
+    if (this.sessionPayloadFile) env.AFS_SESSION_CLIENT_PAYLOAD_JSON = this.sessionPayloadFile;
+    if (this.sessionContextPath) env.AFS_ACTIVE_CONTEXT_ROOT = this.sessionContextPath;
+    if (this.sessionPromptJson) env.AFS_SESSION_SYSTEM_PROMPT_JSON = this.sessionPromptJson;
+    if (this.sessionPromptText) env.AFS_SESSION_SYSTEM_PROMPT_TEXT = this.sessionPromptText;
+    if (this.activeTurnId) env.AFS_SESSION_DEFAULT_TURN_ID = this.activeTurnId;
+    return env;
+  }
+
+  private async ensureSessionHarness(): Promise<void> {
+    if (this.sessionId) {
+      return;
+    }
+
+    this.sessionId = randomUUID().replace(/-/g, "").slice(0, 12);
+    this.sessionWorkspace = this.workspaceRoot();
+
+    try {
+      const payload = await this.execCliJson(
+        [
+          "session",
+          "prepare-client",
+          "--client",
+          "vscode",
+          "--session-id",
+          this.sessionId,
+          "--cwd",
+          this.sessionWorkspace,
+          "--path",
+          this.sessionWorkspace,
+          "--model",
+          "generic",
+          "--workflow",
+          "general",
+          "--tool-profile",
+          "context_readonly",
+          "--pack-mode",
+          "focused",
+          "--task",
+          "VS Code AFS transport session",
+          "--skills-prompt",
+          "vscode ide transport context filesystem",
+          "--json",
+        ],
+        { includeSessionEnv: false },
+      );
+
+      this.sessionPayloadFile = this.payloadArtifactPath(payload);
+      this.sessionContextPath = this.stringValue(payload.context_path);
+      const promptArtifacts = this.artifactPaths((payload.prompt as Record<string, unknown> | undefined) ?? {});
+      this.sessionPromptJson = promptArtifacts.json ?? "";
+      this.sessionPromptText = promptArtifacts.text ?? "";
+    } catch (err) {
+      this.logger.appendLine(`[mcp harness] prepare-client failed: ${err}`);
+      return;
+    }
+
+    try {
+      await this.runSessionHook("session_start");
+    } catch (err) {
+      this.logger.appendLine(`[mcp harness] session_start failed: ${err}`);
+    }
+  }
+
+  private async runSessionHook(event: string, extraArgs: string[] = []): Promise<void> {
+    if (!this.sessionId) {
+      return;
+    }
+    const args = [
+      "session",
+      "hook",
+      event,
+      "--client",
+      "vscode",
+      "--session-id",
+      this.sessionId,
+      "--cwd",
+      this.sessionWorkspace || this.workspaceRoot(),
+      "--path",
+      this.sessionWorkspace || this.workspaceRoot(),
+    ];
+    if (this.sessionPayloadFile) {
+      args.push("--payload-file", this.sessionPayloadFile);
+    }
+    args.push(...extraArgs);
+    await this.execCli(args, { includeSessionEnv: false });
+  }
+
+  private async runSessionEvent(event: string, extraArgs: string[] = []): Promise<void> {
+    if (!this.sessionId) {
+      return;
+    }
+    const eventArgs = [...extraArgs];
+    if (this.activeTurnId && !this.hasArg(eventArgs, "--turn-id")) {
+      eventArgs.push("--turn-id", this.activeTurnId);
+    }
+    const args = [
+      "session",
+      "event",
+      event,
+      "--client",
+      "vscode",
+      "--session-id",
+      this.sessionId,
+      "--cwd",
+      this.sessionWorkspace || this.workspaceRoot(),
+      "--path",
+      this.sessionWorkspace || this.workspaceRoot(),
+    ];
+    if (this.sessionPayloadFile) {
+      args.push("--payload-file", this.sessionPayloadFile);
+    }
+    args.push(...eventArgs);
+    await this.execCli(args, { includeSessionEnv: false });
+  }
+
+  private async recordToolEvent(
+    event: "task_created" | "task_completed" | "task_failed",
+    toolName: string,
+    taskId: string,
+    summary: string,
+    status: string,
+    reason = "",
+  ): Promise<void> {
+    try {
+      const args = [
+        "--task-id",
+        taskId,
+        "--task-title",
+        toolName,
+        "--summary",
+        summary,
+        "--status",
+        status,
+      ];
+      if (reason) {
+        args.push("--reason", reason);
+      }
+      await this.runSessionEvent(event, args);
+    } catch (err) {
+      this.logger.appendLine(`[mcp harness] ${event} failed: ${err}`);
+    }
+  }
+
+  private payloadArtifactPath(payload: Record<string, unknown>): string {
+    const raw = payload.artifact_paths;
+    if (!raw || typeof raw !== "object") {
+      return "";
+    }
+    return this.stringValue((raw as Record<string, unknown>).json);
+  }
+
+  private artifactPaths(section: Record<string, unknown>): Record<string, string | undefined> {
+    const raw = section.artifact_paths;
+    if (!raw || typeof raw !== "object") {
+      return {};
+    }
+    const entries = raw as Record<string, unknown>;
+    return {
+      json: this.stringValue(entries.json),
+      text: this.stringValue(entries.text),
+      markdown: this.stringValue(entries.markdown),
+    };
+  }
+
+  private stringValue(value: unknown): string {
+    return typeof value === "string" ? value : "";
+  }
+
+  private hasArg(args: string[], flag: string): boolean {
+    return args.includes(flag);
+  }
+
+  private execCli(extraArgs: string[], options: ExecCliOptions = {}): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const env = {
+        ...process.env,
+        ...this.env,
+        ...(options.includeSessionEnv === false ? {} : this.sessionEnv()),
+      };
+      execFile(
+        this.command,
+        [...this.cliArgs, ...extraArgs],
+        { env, timeout: this.timeout },
+        (err, stdout, stderr) => {
+          if (stderr) this.logger.appendLine(`[cli stderr] ${stderr.trimEnd()}`);
+          if (err) return reject(err);
+          resolve(stdout);
+        },
+      );
+    });
+  }
+
+  private async execCliJson(
+    extraArgs: string[],
+    options: ExecCliOptions = {},
+  ): Promise<Record<string, unknown>> {
+    const output = await this.execCli(extraArgs, options);
+    return JSON.parse(output) as Record<string, unknown>;
+  }
 
   private sendRequest(method: string, params: Record<string, unknown>): Promise<JsonRpcResponse> {
     return new Promise((resolve, reject) => {

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import signal
 import subprocess
@@ -20,6 +21,8 @@ from ..context_paths import resolve_agent_output_root
 from ..profiles import resolve_active_profile
 from ..schema import AFSConfig, AgentConfig
 from .base import AgentResult, build_base_parser, configure_logging, emit_result, now_iso
+
+_log = logging.getLogger(__name__)
 
 DEFAULT_INTERVAL_SECONDS = 60
 
@@ -111,7 +114,7 @@ def _watch_signature(path: Path) -> tuple[bool, int, int, int]:
 class RunningAgent:
     name: str
     pid: int | None = None
-    state: str = "stopped"  # stopped, running, failed, awaiting_review
+    state: str = "stopped"  # stopped, running, failed, awaiting_review, circuit_open
     started_at: str = ""
     module: str = ""
     args: list[str] = field(default_factory=list)
@@ -146,6 +149,11 @@ class RunningAgent:
 class AgentSupervisor:
     STATE_DIR = Path.home() / ".config" / "afs" / "agents" / "state"
 
+    # Restart backoff parameters
+    RESTART_BASE_DELAY: float = 30.0  # seconds
+    RESTART_MAX_DELAY: float = 300.0  # seconds
+    CIRCUIT_COOLDOWN: float = 3600.0  # 1 hour
+
     def __init__(
         self,
         state_dir: Path | None = None,
@@ -155,6 +163,11 @@ class AgentSupervisor:
         self._config = config
         self._state_dir = self._resolve_state_dir(state_dir, config)
         self._state_dir.mkdir(parents=True, exist_ok=True)
+        # Per-agent failure tracking for restart-with-backoff
+        self._failure_counts: dict[str, int] = {}
+        self._last_failure_at: dict[str, float] = {}
+        # Circuit breaker: agents that have exhausted max_restarts
+        self._circuit_opened_at: dict[str, float] = {}
 
     def _resolve_state_dir(
         self,
@@ -309,6 +322,134 @@ class AgentSupervisor:
             pass
         return False
 
+    def _get_agent_config(self, name: str) -> AgentConfig | None:
+        """Look up the AgentConfig for *name* from the active profile."""
+        try:
+            config = self._config or load_config_model(merge_user=True)
+            profile = resolve_active_profile(config)
+            for ac in profile.agent_configs:
+                if ac.name == name:
+                    return ac
+        except Exception:
+            pass
+        return None
+
+    def _record_failure(self, name: str) -> int:
+        """Increment failure counter for *name* and return the new count."""
+        self._failure_counts[name] = self._failure_counts.get(name, 0) + 1
+        self._last_failure_at[name] = time.monotonic()
+        return self._failure_counts[name]
+
+    def _reset_failure(self, name: str) -> None:
+        """Reset failure tracking for *name* (e.g. after successful completion)."""
+        self._failure_counts.pop(name, None)
+        self._last_failure_at.pop(name, None)
+        self._circuit_opened_at.pop(name, None)
+
+    def _backoff_delay(self, failure_count: int) -> float:
+        """Calculate exponential backoff: min(base * 2^(n-1), max_delay)."""
+        return min(
+            self.RESTART_BASE_DELAY * (2 ** (failure_count - 1)),
+            self.RESTART_MAX_DELAY,
+        )
+
+    def _should_restart(self, name: str, agent_config: AgentConfig) -> bool:
+        """Decide whether a failed agent should be automatically restarted.
+
+        Checks ``restart_on_failure``, failure budget, circuit breaker cooldown,
+        and backoff timing.  Returns True only when all conditions are met.
+        """
+        if not agent_config.restart_on_failure:
+            return False
+
+        now = time.monotonic()
+        failure_count = self._failure_counts.get(name, 0)
+
+        # Circuit breaker: already exhausted restarts?
+        if name in self._circuit_opened_at:
+            opened = self._circuit_opened_at[name]
+            if now - opened < self.CIRCUIT_COOLDOWN:
+                return False
+            # Cooldown elapsed -- reset and allow a fresh round of retries.
+            _log.warning(
+                "Agent %s: circuit breaker cooldown elapsed, resetting failure state",
+                name,
+            )
+            self._reset_failure(name)
+            return True
+
+        # Budget check
+        if failure_count >= agent_config.max_restarts:
+            _log.warning(
+                "Agent %s: max restarts (%d) exhausted, opening circuit breaker",
+                name,
+                agent_config.max_restarts,
+            )
+            self._circuit_opened_at[name] = now
+            return False
+
+        # Backoff: enough time since last failure?
+        last_failure = self._last_failure_at.get(name)
+        if last_failure is not None:
+            required_delay = self._backoff_delay(failure_count)
+            elapsed = now - last_failure
+            if elapsed < required_delay:
+                return False
+
+        return True
+
+    def _attempt_restart(self, agent: RunningAgent) -> RunningAgent | None:
+        """Try to restart a failed agent with backoff.
+
+        Returns the new RunningAgent if restarted, None otherwise.
+        """
+        agent_config = self._get_agent_config(agent.name)
+        if agent_config is None or not agent_config.module:
+            return None
+
+        if not self._should_restart(agent.name, agent_config):
+            return None
+
+        failure_count = self._failure_counts.get(agent.name, 0)
+        delay = self._backoff_delay(failure_count) if failure_count > 0 else 0
+        _log.warning(
+            "Agent %s: automatic restart attempt %d/%d (backoff=%.0fs)",
+            agent.name,
+            failure_count + 1,
+            agent_config.max_restarts,
+            delay,
+        )
+
+        try:
+            # Clear manually_stopped so spawn proceeds.
+            agent.manually_stopped = False
+            self._write_state(agent)
+            restarted = self.spawn(
+                agent.name,
+                agent_config.module,
+                args=agent.args if agent.args else None,
+                reason=f"auto_restart (attempt {failure_count + 1})",
+                agent_config=agent_config,
+            )
+            return restarted
+        except RuntimeError:
+            _log.warning(
+                "Agent %s: restart spawn failed",
+                agent.name,
+                exc_info=True,
+            )
+            return None
+
+    def _validate_agent_result(self, result: AgentResult) -> None:
+        """Run validation on an AgentResult and log warnings for any issues."""
+        errors = result.validate()
+        if errors:
+            _log.warning(
+                "Agent result validation warnings for %s: %s",
+                result.name,
+                "; ".join(errors),
+            )
+
     def _refresh_state(self, agent: RunningAgent) -> RunningAgent:
         if agent.pid and not self._pid_alive(agent.pid):
             previous_state = agent.state
@@ -333,16 +474,46 @@ class AgentSupervisor:
                     else None,
                 )
                 if previous_state == "running":
-                    self._log_lifecycle(
-                        agent.name,
-                        "failed" if agent.state == "failed" else "completed",
-                        metadata={
-                            "session_id": agent.session_id,
-                            "launch_reason": agent.launch_reason,
-                            "state": agent.state,
-                            "error": agent.last_error,
-                        },
-                    )
+                    if agent.state == "failed":
+                        self._record_failure(agent.name)
+                        self._log_lifecycle(
+                            agent.name,
+                            "failed",
+                            metadata={
+                                "session_id": agent.session_id,
+                                "launch_reason": agent.launch_reason,
+                                "state": agent.state,
+                                "error": agent.last_error,
+                                "failure_count": self._failure_counts.get(agent.name, 0),
+                            },
+                        )
+                        # Attempt automatic restart
+                        restarted = self._attempt_restart(agent)
+                        if restarted is not None:
+                            return restarted
+                        # If restart was not attempted or failed, check circuit breaker
+                        ac = self._get_agent_config(agent.name)
+                        if (
+                            ac is not None
+                            and ac.restart_on_failure
+                            and agent.name in self._circuit_opened_at
+                        ):
+                            agent.state = "circuit_open"
+                            self._write_state(agent)
+                            self._update_registry(agent)
+                    else:
+                        # Successful completion -- reset failure tracking
+                        self._reset_failure(agent.name)
+                        self._log_lifecycle(
+                            agent.name,
+                            "completed",
+                            metadata={
+                                "session_id": agent.session_id,
+                                "launch_reason": agent.launch_reason,
+                                "state": agent.state,
+                                "error": agent.last_error,
+                            },
+                        )
                 return agent
 
             # No completion record found — check if this was a one-shot
@@ -357,16 +528,45 @@ class AgentSupervisor:
             self._write_state(agent)
             self._update_registry(agent)
             if previous_state == "running":
-                self._log_lifecycle(
-                    agent.name,
-                    "failed" if agent.state == "failed" else "completed",
-                    metadata={
-                        "session_id": agent.session_id,
-                        "launch_reason": agent.launch_reason,
-                        "state": agent.state,
-                        "error": agent.last_error,
-                    },
-                )
+                if agent.state == "failed":
+                    self._record_failure(agent.name)
+                    self._log_lifecycle(
+                        agent.name,
+                        "failed",
+                        metadata={
+                            "session_id": agent.session_id,
+                            "launch_reason": agent.launch_reason,
+                            "state": agent.state,
+                            "error": agent.last_error,
+                            "failure_count": self._failure_counts.get(agent.name, 0),
+                        },
+                    )
+                    # Attempt automatic restart
+                    restarted = self._attempt_restart(agent)
+                    if restarted is not None:
+                        return restarted
+                    # If restart was not attempted or failed, check circuit breaker
+                    ac = self._get_agent_config(agent.name)
+                    if (
+                        ac is not None
+                        and ac.restart_on_failure
+                        and agent.name in self._circuit_opened_at
+                    ):
+                        agent.state = "circuit_open"
+                        self._write_state(agent)
+                        self._update_registry(agent)
+                else:
+                    self._reset_failure(agent.name)
+                    self._log_lifecycle(
+                        agent.name,
+                        "completed",
+                        metadata={
+                            "session_id": agent.session_id,
+                            "launch_reason": agent.launch_reason,
+                            "state": agent.state,
+                            "error": agent.last_error,
+                        },
+                    )
 
         # Recovery: if a one-shot agent is stuck as "failed" with no pid
         # (e.g. from a previous run before the one-shot fix), correct it.
@@ -381,6 +581,119 @@ class AgentSupervisor:
             self._update_registry(agent)
 
         return agent
+
+    def _check_dependencies(
+        self,
+        agent_name: str,
+        config: AgentConfig,
+        all_configs: list[AgentConfig],
+    ) -> tuple[bool, str]:
+        """Check whether *agent_name* is ready to run.
+
+        Verifies two opt-in constraints:
+
+        1. **depends_on** -- every named agent must have completed
+           successfully (state == "stopped" with no error).
+        2. **mutex_group** -- no other agent in the same group may be
+           currently running.
+
+        Returns ``(True, "")`` when all constraints are satisfied, or
+        ``(False, reason)`` with a human-readable explanation otherwise.
+        """
+        # --- depends_on ---
+        for dep_name in config.depends_on:
+            dep_status = self.status(dep_name)
+            if dep_status is None:
+                return False, f"dependency '{dep_name}' has never run"
+            if dep_status.state == "running":
+                return False, f"dependency '{dep_name}' is still running"
+            if dep_status.state in ("failed", "circuit_open"):
+                return False, f"dependency '{dep_name}' is in state '{dep_status.state}'"
+            if dep_status.state == "awaiting_review":
+                return False, f"dependency '{dep_name}' is awaiting review"
+            # "stopped" is the successful terminal state
+
+        # --- mutex_group ---
+        if config.mutex_group:
+            group_members = [
+                c for c in all_configs
+                if c.mutex_group == config.mutex_group and c.name != agent_name
+            ]
+            for member in group_members:
+                member_status = self.status(member.name)
+                if member_status is not None and member_status.state == "running":
+                    return (
+                        False,
+                        f"mutex group '{config.mutex_group}': "
+                        f"agent '{member.name}' is already running",
+                    )
+
+        return True, ""
+
+    def _process_handoff_targets(
+        self,
+        completed_agent_name: str,
+        agent_configs: list[AgentConfig],
+    ) -> list[RunningAgent]:
+        """After an agent completes, check for targeted handoffs and spawn targets.
+
+        Scans the handoff store for packets whose ``target_agent`` matches a
+        configured agent.  If found, acknowledges the handoff and spawns the
+        target (subject to normal dependency / mutex checks).
+        """
+        started: list[RunningAgent] = []
+        try:
+            from ..handoff import HandoffStore
+
+            context_root = self._context_root_path()
+            store = HandoffStore(context_root, config=self._config)
+        except Exception:
+            return started
+
+        for config in agent_configs:
+            pending = store.pending_for_agent(config.name)
+            if not pending:
+                continue
+            # Only act on handoffs created by the agent that just completed
+            relevant = [p for p in pending if p.agent_name == completed_agent_name]
+            if not relevant:
+                continue
+
+            existing = self.status(config.name)
+            if existing and (
+                existing.state in ("running", "awaiting_review")
+                or existing.manually_stopped
+            ):
+                continue
+
+            if not config.module:
+                continue
+
+            ready, reason = self._check_dependencies(
+                config.name, config, agent_configs,
+            )
+            if not ready:
+                _log.info(
+                    "Handoff target '%s' not ready: %s", config.name, reason,
+                )
+                continue
+
+            # Acknowledge all relevant handoffs for this target
+            for packet in relevant:
+                store.acknowledge(packet.session_id, config.name)
+
+            try:
+                agent = self.spawn(
+                    config.name,
+                    config.module,
+                    reason=f"handoff from {completed_agent_name}",
+                    agent_config=config,
+                )
+                started.append(agent)
+            except RuntimeError:
+                continue
+
+        return started
 
     def _build_agent_env(
         self, name: str, agent_config: AgentConfig | None,
@@ -680,7 +993,18 @@ class AgentSupervisor:
             if not config.auto_start or not config.module:
                 continue
             existing = self.status(config.name)
-            if existing and (existing.state in ("running", "awaiting_review") or existing.manually_stopped):
+            if existing and (
+                existing.state in ("running", "awaiting_review", "circuit_open")
+                or existing.manually_stopped
+            ):
+                continue
+            ready, reason = self._check_dependencies(
+                config.name, config, agent_configs,
+            )
+            if not ready:
+                _log.info(
+                    "Skipping auto_start for '%s': %s", config.name, reason,
+                )
                 continue
             try:
                 started.append(
@@ -749,7 +1073,10 @@ class AgentSupervisor:
             if interval_seconds is None or not config.module:
                 continue
             existing = self.status(config.name)
-            if existing and (existing.state in ("running", "awaiting_review") or existing.manually_stopped):
+            if existing and (
+                existing.state in ("running", "awaiting_review", "circuit_open")
+                or existing.manually_stopped
+            ):
                 continue
             if existing is None:
                 due.append(config)
@@ -793,7 +1120,20 @@ class AgentSupervisor:
             if not config.module:
                 continue
             existing = self.status(config.name)
-            if existing and (existing.state in ("running", "awaiting_review") or existing.manually_stopped):
+            if existing and (
+                existing.state in ("running", "awaiting_review", "circuit_open")
+                or existing.manually_stopped
+            ):
+                continue
+            ready, dep_reason = self._check_dependencies(
+                config.name, config, agent_configs,
+            )
+            if not ready:
+                _log.info(
+                    "Skipping '%s' during reconcile: %s",
+                    config.name,
+                    dep_reason,
+                )
                 continue
             try:
                 started.append(
@@ -806,15 +1146,28 @@ class AgentSupervisor:
                 )
             except RuntimeError:
                 continue
+
+        # After spawning, check for targeted handoff-driven agents.
+        # We scan for any agents that completed during this reconcile cycle
+        # (their state transitioned from running to stopped) and process
+        # their handoff targets.
+        for agent in self.list_agents():
+            if agent.state == "stopped" and not agent.manually_stopped:
+                handoff_started = self._process_handoff_targets(
+                    agent.name, agent_configs,
+                )
+                started.extend(handoff_started)
+
         return started
 
     def audit(self) -> dict[str, object]:
         agents = self.list_agents()
-        counts = {
+        counts: dict[str, int] = {
             "running": 0,
             "failed": 0,
             "stopped": 0,
             "manual_stop": 0,
+            "circuit_open": 0,
             "configured": len(agents),
         }
         stale_pid_files: list[str] = []
@@ -824,6 +1177,9 @@ class AgentSupervisor:
                 counts["running"] += 1
             elif agent.state == "failed":
                 counts["failed"] += 1
+                stale_pid_files.append(agent.name)
+            elif agent.state == "circuit_open":
+                counts["circuit_open"] += 1
                 stale_pid_files.append(agent.name)
             else:
                 counts["stopped"] += 1
@@ -935,6 +1291,8 @@ def _run_once(
             "audit": audit,
         },
     )
+    # Validate the supervisor's own result
+    supervisor._validate_agent_result(result)
     return result, current_watch_state
 
 

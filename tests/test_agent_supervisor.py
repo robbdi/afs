@@ -312,3 +312,139 @@ def test_supervisor_audit_reports_failed_and_manual_stop(tmp_path: Path) -> None
     assert audit["counts"]["failed"] == 1
     assert audit["counts"]["manual_stop"] == 1
     assert "failed-agent" in audit["stale_pid_files"]
+
+
+# --- Dependency management tests ---
+
+
+def test_check_dependencies_no_deps(tmp_path: Path) -> None:
+    """Agents with no depends_on or mutex_group always pass."""
+    supervisor = AgentSupervisor(state_dir=tmp_path / "state")
+    config = AgentConfig(name="a", module="pkg.a")
+    ready, reason = supervisor._check_dependencies("a", config, [config])
+    assert ready is True
+    assert reason == ""
+
+
+def test_check_dependencies_depends_on_never_run(tmp_path: Path) -> None:
+    supervisor = AgentSupervisor(state_dir=tmp_path / "state")
+    config = AgentConfig(name="b", module="pkg.b", depends_on=["a"])
+    ready, reason = supervisor._check_dependencies("b", config, [config])
+    assert ready is False
+    assert "has never run" in reason
+
+
+def test_check_dependencies_depends_on_still_running(tmp_path: Path) -> None:
+    supervisor = AgentSupervisor(state_dir=tmp_path / "state")
+    mock_proc = type("MockProc", (), {"pid": 11111})()
+    with patch("subprocess.Popen", return_value=mock_proc):
+        supervisor.spawn("dep-agent", "pkg.dep")
+
+    config = AgentConfig(name="child", module="pkg.child", depends_on=["dep-agent"])
+    with patch.object(supervisor, "_pid_alive", return_value=True):
+        ready, reason = supervisor._check_dependencies("child", config, [config])
+    assert ready is False
+    assert "still running" in reason
+
+
+def test_check_dependencies_depends_on_completed(tmp_path: Path) -> None:
+    supervisor = AgentSupervisor(state_dir=tmp_path / "state")
+    mock_proc = type("MockProc", (), {"pid": 22222})()
+    with patch("subprocess.Popen", return_value=mock_proc):
+        supervisor.spawn("dep-agent", "pkg.dep")
+
+    # Simulate clean stop
+    with patch.object(supervisor, "_pid_alive", return_value=True):
+        supervisor.stop("dep-agent")
+
+    # Mark as not manually stopped so state is clean "stopped"
+    agent = supervisor._read_state("dep-agent")
+    agent.manually_stopped = False
+    supervisor._write_state(agent)
+
+    config = AgentConfig(name="child", module="pkg.child", depends_on=["dep-agent"])
+    ready, reason = supervisor._check_dependencies("child", config, [config])
+    assert ready is True
+    assert reason == ""
+
+
+def test_check_dependencies_depends_on_failed(tmp_path: Path) -> None:
+    supervisor = AgentSupervisor(state_dir=tmp_path / "state")
+    mock_proc = type("MockProc", (), {"pid": 33333})()
+    with patch("subprocess.Popen", return_value=mock_proc):
+        supervisor.spawn("dep-agent", "pkg.dep")
+
+    # Simulate failure
+    with patch.object(supervisor, "_pid_alive", return_value=False):
+        supervisor.status("dep-agent")
+
+    config = AgentConfig(name="child", module="pkg.child", depends_on=["dep-agent"])
+    ready, reason = supervisor._check_dependencies("child", config, [config])
+    assert ready is False
+    assert "failed" in reason
+
+
+def test_check_dependencies_mutex_group_blocks(tmp_path: Path) -> None:
+    supervisor = AgentSupervisor(state_dir=tmp_path / "state")
+    mock_proc = type("MockProc", (), {"pid": 44444})()
+    with patch("subprocess.Popen", return_value=mock_proc):
+        supervisor.spawn("agent-a", "pkg.a")
+
+    configs = [
+        AgentConfig(name="agent-a", module="pkg.a", mutex_group="exclusive"),
+        AgentConfig(name="agent-b", module="pkg.b", mutex_group="exclusive"),
+    ]
+    with patch.object(supervisor, "_pid_alive", return_value=True):
+        ready, reason = supervisor._check_dependencies("agent-b", configs[1], configs)
+    assert ready is False
+    assert "mutex group" in reason
+    assert "agent-a" in reason
+
+
+def test_check_dependencies_mutex_group_allows_when_stopped(tmp_path: Path) -> None:
+    supervisor = AgentSupervisor(state_dir=tmp_path / "state")
+    mock_proc = type("MockProc", (), {"pid": 55555})()
+    with patch("subprocess.Popen", return_value=mock_proc):
+        supervisor.spawn("agent-a", "pkg.a")
+
+    with patch.object(supervisor, "_pid_alive", return_value=True):
+        supervisor.stop("agent-a")
+
+    configs = [
+        AgentConfig(name="agent-a", module="pkg.a", mutex_group="exclusive"),
+        AgentConfig(name="agent-b", module="pkg.b", mutex_group="exclusive"),
+    ]
+    ready, reason = supervisor._check_dependencies("agent-b", configs[1], configs)
+    assert ready is True
+
+
+def test_reconcile_skips_unmet_dependencies(tmp_path: Path) -> None:
+    """reconcile() should not spawn an agent whose dependencies aren't met."""
+    supervisor = AgentSupervisor(state_dir=tmp_path / "state")
+    configs = [
+        AgentConfig(name="dep", module="pkg.dep", auto_start=True),
+        AgentConfig(name="child", module="pkg.child", auto_start=True, depends_on=["dep"]),
+    ]
+    mock_proc = type("MockProc", (), {"pid": 66666})()
+    with patch("subprocess.Popen", return_value=mock_proc):
+        started = supervisor.reconcile(configs)
+
+    # Only "dep" should start, not "child" (because dep hasn't completed yet)
+    names = [a.name for a in started]
+    assert "dep" in names
+    assert "child" not in names
+
+
+def test_auto_start_skips_unmet_dependencies(tmp_path: Path) -> None:
+    supervisor = AgentSupervisor(state_dir=tmp_path / "state")
+    configs = [
+        AgentConfig(name="dep", module="pkg.dep", auto_start=True),
+        AgentConfig(name="child", module="pkg.child", auto_start=True, depends_on=["dep"]),
+    ]
+    mock_proc = type("MockProc", (), {"pid": 77777})()
+    with patch("subprocess.Popen", return_value=mock_proc):
+        started = supervisor.auto_start(configs)
+
+    names = [a.name for a in started]
+    assert "dep" in names
+    assert "child" not in names

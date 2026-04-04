@@ -28,7 +28,14 @@ export async function createTransport(
 
   // MCP mode or auto
   const mcpArgs = [...binaryInfo.args, "mcp", "serve", ...extraArgs];
-  const client = new McpStdioClient(binaryInfo.command, mcpArgs, env, logger, timeout);
+  const client = new McpStdioClient(
+    binaryInfo.command,
+    binaryInfo.args,
+    mcpArgs,
+    env,
+    logger,
+    timeout,
+  );
 
   if (mode === "auto") {
     try {

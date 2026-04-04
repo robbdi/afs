@@ -35,6 +35,13 @@ export interface ServerCapabilities {
   prompts: boolean;
 }
 
+/** Optional turn lifecycle surface for host-driven session events. */
+export interface TurnLifecycleClient {
+  beginTurn(prompt: string, summary?: string): Promise<string>;
+  completeTurn(turnId: string, summary?: string): Promise<void>;
+  failTurn(turnId: string, error: unknown, summary?: string): Promise<void>;
+}
+
 /** Transport abstraction for communicating with AFS backend. */
 export interface ITransportClient extends vscode.Disposable {
   initialize(): Promise<void>;
@@ -52,6 +59,11 @@ export interface ITransportClient extends vscode.Disposable {
   // Prompts
   listPrompts(): Promise<McpPrompt[]>;
   getPrompt(name: string, args?: Record<string, unknown>): Promise<McpPromptMessage[]>;
+
+  // Optional host turn lifecycle
+  beginTurn?(prompt: string, summary?: string): Promise<string>;
+  completeTurn?(turnId: string, summary?: string): Promise<void>;
+  failTurn?(turnId: string, error: unknown, summary?: string): Promise<void>;
 
   onConnectionStateChanged: vscode.Event<ConnectionState>;
 }

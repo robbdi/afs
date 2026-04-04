@@ -26,6 +26,8 @@ export class CliClient implements ITransportClient {
   private sessionPromptText = "";
   private sessionWorkspace = "";
   private toolTaskCounter = 0;
+  private turnCounter = 0;
+  private activeTurnId = "";
   private readonly _onConnectionStateChanged = new vscode.EventEmitter<ConnectionState>();
   readonly onConnectionStateChanged = this._onConnectionStateChanged.event;
 
@@ -392,7 +394,94 @@ export class CliClient implements ITransportClient {
     throw new Error("CLI transport does not support prompts");
   }
 
+  async beginTurn(prompt: string, summary?: string): Promise<string> {
+    await this.ensureSessionHarness();
+    if (!this.sessionId) {
+      return "";
+    }
+
+    const turnId = this.nextTurnId();
+    const promptText = prompt.trim();
+    const turnSummary = ((summary ?? promptText) || "VS Code command").trim();
+    try {
+      await this.runSessionEvent("user_prompt_submit", [
+        "--turn-id",
+        turnId,
+        "--prompt",
+        promptText || prompt,
+      ]);
+      this.activeTurnId = turnId;
+      const args = ["--turn-id", turnId];
+      if (turnSummary) {
+        args.push("--summary", turnSummary);
+      }
+      await this.runSessionEvent("turn_started", args);
+      return turnId;
+    } catch (err) {
+      this.activeTurnId = "";
+      this.logger.appendLine(`[cli harness] beginTurn failed: ${err}`);
+      return "";
+    }
+  }
+
+  async completeTurn(turnId: string, summary?: string): Promise<void> {
+    if (!turnId) {
+      return;
+    }
+    try {
+      const args = ["--turn-id", turnId];
+      if (summary?.trim()) {
+        args.push("--summary", summary.trim());
+      }
+      args.push("--reason", "vscode_command");
+      await this.runSessionEvent("turn_completed", args);
+    } catch (err) {
+      this.logger.appendLine(`[cli harness] completeTurn failed: ${err}`);
+    } finally {
+      if (this.activeTurnId === turnId) {
+        this.activeTurnId = "";
+      }
+    }
+  }
+
+  async failTurn(turnId: string, error: unknown, summary?: string): Promise<void> {
+    if (!turnId) {
+      return;
+    }
+    try {
+      const args = ["--turn-id", turnId];
+      if (summary?.trim()) {
+        args.push("--summary", summary.trim());
+      }
+      const reason = error instanceof Error ? error.message : String(error);
+      if (reason.trim()) {
+        args.push("--reason", reason.trim());
+      }
+      await this.runSessionEvent("turn_failed", args);
+    } catch (err) {
+      this.logger.appendLine(`[cli harness] failTurn failed: ${err}`);
+    } finally {
+      if (this.activeTurnId === turnId) {
+        this.activeTurnId = "";
+      }
+    }
+  }
+
   dispose(): void {
+    if (this.activeTurnId) {
+      const turnId = this.activeTurnId;
+      this.activeTurnId = "";
+      void this.runSessionEvent("turn_failed", [
+        "--turn-id",
+        turnId,
+        "--summary",
+        "VS Code command interrupted by client dispose",
+        "--reason",
+        "client_dispose",
+      ]).catch((err) => {
+        this.logger.appendLine(`[cli harness] turn_failed failed: ${err}`);
+      });
+    }
     if (this.sessionId) {
       void this.runSessionHook("session_end", ["--reason", "client_dispose"]).catch((err) => {
         this.logger.appendLine(`[cli harness] session_end failed: ${err}`);
@@ -412,6 +501,11 @@ export class CliClient implements ITransportClient {
     return `vscode-tool-${this.toolTaskCounter}`;
   }
 
+  private nextTurnId(): string {
+    this.turnCounter += 1;
+    return `vscode-turn-${this.turnCounter}`;
+  }
+
   private sessionEnv(): Record<string, string> {
     const env: Record<string, string> = {};
     if (this.sessionId) env.AFS_SESSION_ID = this.sessionId;
@@ -419,6 +513,7 @@ export class CliClient implements ITransportClient {
     if (this.sessionContextPath) env.AFS_ACTIVE_CONTEXT_ROOT = this.sessionContextPath;
     if (this.sessionPromptJson) env.AFS_SESSION_SYSTEM_PROMPT_JSON = this.sessionPromptJson;
     if (this.sessionPromptText) env.AFS_SESSION_SYSTEM_PROMPT_TEXT = this.sessionPromptText;
+    if (this.activeTurnId) env.AFS_SESSION_DEFAULT_TURN_ID = this.activeTurnId;
     return env;
   }
 
@@ -505,6 +600,10 @@ export class CliClient implements ITransportClient {
     if (!this.sessionId) {
       return;
     }
+    const eventArgs = [...extraArgs];
+    if (this.activeTurnId && !this.hasArg(eventArgs, "--turn-id")) {
+      eventArgs.push("--turn-id", this.activeTurnId);
+    }
     const args = [
       "session",
       "event",
@@ -521,7 +620,7 @@ export class CliClient implements ITransportClient {
     if (this.sessionPayloadFile) {
       args.push("--payload-file", this.sessionPayloadFile);
     }
-    args.push(...extraArgs);
+    args.push(...eventArgs);
     await this.exec(args, { includeSessionEnv: false });
   }
 
@@ -576,6 +675,10 @@ export class CliClient implements ITransportClient {
 
   private stringValue(value: unknown): string {
     return typeof value === "string" ? value : "";
+  }
+
+  private hasArg(args: string[], flag: string): boolean {
+    return args.includes(flag);
   }
 
   private exec(extraArgs: string[], options: ExecOptions = {}): Promise<string> {

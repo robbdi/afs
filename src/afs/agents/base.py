@@ -19,6 +19,9 @@ from ..models import ContextRoot
 from ..schema import AFSConfig
 
 
+VALID_STATUSES: frozenset[str] = frozenset({"ok", "warning", "error", "skipped", "timeout"})
+
+
 @dataclass
 class AgentResult:
     name: str
@@ -43,6 +46,125 @@ class AgentResult:
             "notes": list(self.notes),
             "payload": dict(self.payload),
         }
+
+    def validate(self) -> list[str]:
+        """Validate the result fields, returning a list of error strings (empty = valid)."""
+        errors: list[str] = []
+
+        if self.status not in VALID_STATUSES:
+            errors.append(
+                f"invalid status {self.status!r}; expected one of {sorted(VALID_STATUSES)}"
+            )
+
+        if not isinstance(self.name, str) or not self.name.strip():
+            errors.append("name must be a non-empty string")
+
+        started_dt = _parse_iso_timestamp(self.started_at)
+        if started_dt is None:
+            errors.append(f"started_at is not a valid ISO timestamp: {self.started_at!r}")
+
+        finished_dt = _parse_iso_timestamp(self.finished_at)
+        if finished_dt is None:
+            errors.append(f"finished_at is not a valid ISO timestamp: {self.finished_at!r}")
+
+        if started_dt is not None and finished_dt is not None and finished_dt < started_dt:
+            errors.append(
+                f"finished_at ({self.finished_at}) is before started_at ({self.started_at})"
+            )
+
+        if self.duration_seconds < 0:
+            errors.append(f"duration_seconds must be >= 0, got {self.duration_seconds}")
+
+        for key in self.metrics:
+            if not isinstance(key, str):
+                errors.append(f"metrics key {key!r} is not a string")
+
+        return errors
+
+
+def _parse_iso_timestamp(value: str) -> datetime | None:
+    """Parse an ISO-format timestamp string, returning None on failure."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except (ValueError, TypeError):
+        return None
+
+
+def validate_result_dict(data: dict[str, Any]) -> tuple[AgentResult | None, list[str]]:
+    """Parse a dict into an AgentResult with validation.
+
+    Returns (result, errors).  If parsing fails outright, result is None and
+    errors contains the reason.  If parsing succeeds, result is populated and
+    errors comes from ``result.validate()``.
+    """
+    errors: list[str] = []
+
+    # --- required fields ---
+    name = data.get("name")
+    if not isinstance(name, str) or not name.strip():
+        errors.append("missing or empty 'name'")
+        name = ""
+
+    status = data.get("status")
+    if not isinstance(status, str):
+        errors.append("missing or non-string 'status'")
+        status = ""
+
+    started_at = data.get("started_at")
+    if not isinstance(started_at, str):
+        errors.append("missing or non-string 'started_at'")
+        started_at = ""
+
+    finished_at = data.get("finished_at")
+    if not isinstance(finished_at, str):
+        errors.append("missing or non-string 'finished_at'")
+        finished_at = ""
+
+    duration_seconds = data.get("duration_seconds")
+    if not isinstance(duration_seconds, (int, float)):
+        errors.append("missing or non-numeric 'duration_seconds'")
+        duration_seconds = 0.0
+
+    # If we had structural parse errors, bail early.
+    if errors:
+        return None, errors
+
+    # --- optional fields ---
+    task = str(data.get("task", ""))
+    raw_metrics = data.get("metrics", {})
+    metrics: dict[str, float | int] = {}
+    if isinstance(raw_metrics, dict):
+        for k, v in raw_metrics.items():
+            if isinstance(k, str) and isinstance(v, (int, float)):
+                metrics[k] = v
+            else:
+                errors.append(f"invalid metrics entry: {k!r}={v!r}")
+    else:
+        errors.append("metrics is not a dict")
+
+    raw_notes = data.get("notes", [])
+    notes = [str(n) for n in raw_notes] if isinstance(raw_notes, list) else []
+
+    raw_payload = data.get("payload", {})
+    payload = dict(raw_payload) if isinstance(raw_payload, dict) else {}
+
+    result = AgentResult(
+        name=name,
+        status=status,
+        started_at=started_at,
+        finished_at=finished_at,
+        duration_seconds=float(duration_seconds),
+        task=task,
+        metrics=metrics,
+        notes=notes,
+        payload=payload,
+    )
+
+    # Run semantic validation on the constructed result.
+    errors.extend(result.validate())
+    return result, errors
 
 
 def build_base_parser(description: str) -> argparse.ArgumentParser:

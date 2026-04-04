@@ -337,6 +337,10 @@ class AgentConfig:
     allowed_mounts: list[str] = field(default_factory=list)
     allowed_tools: list[str] = field(default_factory=list)
     workspace_isolated: bool = False
+    restart_on_failure: bool = False
+    max_restarts: int = 3
+    depends_on: list[str] = field(default_factory=list)
+    mutex_group: str = ""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AgentConfig:
@@ -359,6 +363,10 @@ class AgentConfig:
             allowed_mounts=_as_str_list(data.get("allowed_mounts")),
             allowed_tools=_as_str_list(data.get("allowed_tools")),
             workspace_isolated=bool(data.get("workspace_isolated", False)),
+            restart_on_failure=bool(data.get("restart_on_failure", False)),
+            max_restarts=int(data.get("max_restarts", 3)),
+            depends_on=_as_str_list(data.get("depends_on")),
+            mutex_group=str(data.get("mutex_group", "")).strip(),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -376,6 +384,10 @@ class AgentConfig:
             "allowed_mounts": list(self.allowed_mounts),
             "allowed_tools": list(self.allowed_tools),
             "workspace_isolated": self.workspace_isolated,
+            "restart_on_failure": self.restart_on_failure,
+            "max_restarts": self.max_restarts,
+            "depends_on": list(self.depends_on),
+            "mutex_group": self.mutex_group,
         }
 
 

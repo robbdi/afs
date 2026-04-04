@@ -389,6 +389,11 @@ def _cache_bootstrap(
             if item not in {MountType.HISTORY.value, MountType.GLOBAL.value}
         ]
 
+    # Strip volatile fields that change between calls but don't affect
+    # pack content (snapshot presence, mtime-based freshness scores).
+    result.pop("session_changes", None)
+    result.pop("mount_freshness", None)
+
     result["recommended_actions"] = _build_recommendations(result)
     return result
 
@@ -486,7 +491,11 @@ def _mount_fingerprint(context_path: Path, *, config: Any = None) -> str:
     Walks the searchable mount directories and hashes (path, mtime, size)
     tuples. This is much cheaper than a full bootstrap but detects any
     file creation, deletion, or content change.
+
+    Agent output artifacts (afs_agents/) are excluded because they are
+    generated during bootstrap and should not invalidate the cache.
     """
+    agent_output = resolve_agent_output_root(context_path, config=config)
     entries: list[str] = []
     # Include metadata.json
     meta = context_path / "metadata.json"
@@ -505,6 +514,12 @@ def _mount_fingerprint(context_path: Path, *, config: Any = None) -> str:
             for path in sorted(mount_root.rglob("*")):
                 if not path.is_file():
                     continue
+                # Skip agent output artifacts (snapshots, reports, etc.)
+                try:
+                    path.relative_to(agent_output)
+                    continue
+                except ValueError:
+                    pass
                 try:
                     st = path.stat()
                     entries.append(f"{path}:{st.st_mtime}:{st.st_size}")

@@ -3,14 +3,24 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .context_freshness import (
+    ContextDiffReport,
+    MountFreshness,
+    context_diff_since_session,
+    mount_freshness,
+    save_context_snapshot,
+)
 from .context_index import ContextSQLiteIndex, count_mount_files
 from .context_paths import resolve_agent_output_root, resolve_mount_root
 from .manager import AFSManager
 from .models import MountType
+
+logger = logging.getLogger(__name__)
 
 SESSION_BOOTSTRAP_JSON = "session_bootstrap.json"
 SESSION_BOOTSTRAP_MARKDOWN = "session_bootstrap.md"
@@ -28,13 +38,15 @@ def _estimate_tokens(text: str) -> int:
 # Sections at the top survive truncation; sections at the bottom are
 # dropped first when the bootstrap exceeds the token budget.
 _SECTION_PRIORITY = [
-    "handoff",       # critical: what happened last session
-    "scratchpad",    # high: current working state
-    "tasks",         # high: pending work items
-    "diff",          # medium: recent changes
-    "memory",        # medium: durable context
-    "hivemind",      # low: cross-agent messages
-    "agent_reports", # low: background agent status
+    "handoff",          # critical: what happened last session
+    "scratchpad",       # high: current working state
+    "tasks",            # high: pending work items
+    "session_changes",  # medium-high: what changed since last session
+    "diff",             # medium: recent index drift
+    "mount_freshness",  # medium: per-mount freshness scores
+    "memory",           # medium: durable context
+    "hivemind",         # low: cross-agent messages
+    "agent_reports",    # low: background agent status
 ]
 
 
@@ -127,11 +139,22 @@ def collect_context_diff(
         "modified": diff["modified"][:item_limit],
         "deleted": diff["deleted"][:item_limit],
     }
-    trimmed["truncated"] = {
+    truncated_counts = {
         "added": max(0, len(diff["added"]) - len(trimmed["added"])),
         "modified": max(0, len(diff["modified"]) - len(trimmed["modified"])),
         "deleted": max(0, len(diff["deleted"]) - len(trimmed["deleted"])),
     }
+    is_truncated = any(v > 0 for v in truncated_counts.values())
+    trimmed["truncated"] = truncated_counts
+    trimmed["is_truncated"] = is_truncated
+    if is_truncated:
+        omitted = sum(truncated_counts.values())
+        logger.info(
+            "context diff truncated: %d of %d total changes omitted (limit=%d)",
+            omitted,
+            diff["total_changes"],
+            item_limit,
+        )
     return trimmed
 
 
@@ -166,17 +189,46 @@ def build_session_bootstrap(
 
     handoff = _collect_latest_handoff(context_path, config=manager.config)
 
-    # Compute stale mounts
+    # Compute per-mount freshness (filesystem-based, no DB needed)
+    decay_hours = manager.config.context_index.decay_hours
+    freshness_map: dict[str, MountFreshness] = {}
     stale_mounts: list[str] = []
     try:
-        index = ContextSQLiteIndex(manager, context_path)
-        if index.has_entries():
-            decay_hours = manager.config.context_index.decay_hours
-            freshness = index.freshness_scores(decay_hours=decay_hours)
-            stale_mounts = [
-                mount for mount, score in freshness["mount_scores"].items()
-                if score < 0.3
-            ]
+        freshness_map = mount_freshness(
+            context_path,
+            config=manager.config,
+            decay_hours=decay_hours,
+        )
+        stale_mounts = [
+            name for name, mf in freshness_map.items() if mf.stale
+        ]
+    except Exception:
+        pass
+
+    # Fall back to index-based freshness when filesystem scan is empty
+    if not freshness_map:
+        try:
+            index = ContextSQLiteIndex(manager, context_path)
+            if index.has_entries():
+                idx_freshness = index.freshness_scores(decay_hours=decay_hours)
+                stale_mounts = [
+                    mount for mount, score in idx_freshness["mount_scores"].items()
+                    if score < 0.3
+                ]
+        except Exception:
+            pass
+
+    # Session-aware diff: compare against previous snapshot if one exists
+    session_changes: dict[str, Any] = {"available": False}
+    try:
+        session_diff = context_diff_since_session(
+            context_path, config=manager.config
+        )
+        if session_diff is not None:
+            session_changes = {
+                "available": True,
+                **session_diff.to_dict(),
+            }
     except Exception:
         pass
 
@@ -200,6 +252,10 @@ def build_session_bootstrap(
         "agent_reports": reports,
         "handoff": handoff,
         "stale_mounts": stale_mounts,
+        "mount_freshness": {
+            k: v.to_dict() for k, v in freshness_map.items()
+        },
+        "session_changes": session_changes,
     }
     summary["recommended_actions"] = _build_recommendations(summary)
 
@@ -214,6 +270,18 @@ def build_session_bootstrap(
                 "bootstrap",
                 metadata={"context_path": str(context_path)},
                 context_root=context_path,
+            )
+        except Exception:
+            pass
+
+        # Save a context snapshot for the next session to diff against
+        import os
+        session_id = os.getenv("AFS_SESSION_ID", "").strip()
+        if not session_id:
+            session_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        try:
+            save_context_snapshot(
+                context_path, session_id, config=manager.config
             )
         except Exception:
             pass
@@ -302,9 +370,34 @@ def render_session_bootstrap(summary: dict[str, Any]) -> str:
     if stale_mounts:
         lines.append(f"- stale_mounts: {', '.join(stale_mounts)}")
 
+    mount_freshness_data = summary.get("mount_freshness", {})
+    if mount_freshness_data:
+        lines.extend(["", "## Mount Freshness"])
+        for mt_name, mf_data in sorted(mount_freshness_data.items()):
+            score = mf_data.get("freshness_score", 0)
+            stale_flag = " [STALE]" if mf_data.get("stale") else ""
+            iso = mf_data.get("newest_mtime_iso", "n/a")
+            lines.append(
+                f"- {mt_name}: score={score:.2f}, files={mf_data.get('file_count', 0)}, newest={iso}{stale_flag}"
+            )
+
+    session_changes = summary.get("session_changes", {})
+    if session_changes.get("available"):
+        lines.extend(["", "## Changes Since Last Session"])
+        lines.append(f"- {session_changes.get('change_summary', 'unknown')}")
+        per_mount = session_changes.get("per_mount_summary", {})
+        if per_mount:
+            lines.append("- per_mount:")
+            for mt_name, counts in sorted(per_mount.items()):
+                parts = [f"{k}={v}" for k, v in sorted(counts.items()) if v > 0]
+                if parts:
+                    lines.append(f"  - {mt_name}: {', '.join(parts)}")
+
     lines.extend(["", "## Recent Drift"])
     if diff["available"]:
         lines.append(f"- total_changes: {diff['total_changes']}")
+        if diff.get("is_truncated"):
+            lines.append("- truncated: true (some changes omitted)")
         for label in ("added", "modified", "deleted"):
             items = diff[label]
             if items:
@@ -721,6 +814,12 @@ def _build_recommendations(summary: dict[str, Any]) -> list[str]:
         recommendations.append("No durable memory summary exists yet; run `afs memory consolidate` if handoff context matters.")
     if memory.get("status", {}).get("stale"):
         recommendations.append("Memory consolidation looks stale; run `afs memory consolidate` before relying on durable summaries.")
+
+    session_changes = summary.get("session_changes", {})
+    if session_changes.get("available") and session_changes.get("total_changes", 0) > 0:
+        recommendations.append(
+            "Review changes since last session before assuming context is current."
+        )
 
     handoff = summary.get("handoff", {})
     if handoff.get("available") and handoff.get("blocked"):

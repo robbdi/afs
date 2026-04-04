@@ -1,7 +1,7 @@
 import * as path from "path";
 import * as vscode from "vscode";
 import type { BinaryInfo } from "../transport/clientFactory";
-import type { ITransportClient } from "../transport/types";
+import type { ITransportClient, TurnLifecycleClient } from "../transport/types";
 import type { ContextService } from "../services/contextService";
 import type { FileService } from "../services/fileService";
 import type { IndexService } from "../services/indexService";
@@ -17,6 +17,49 @@ interface CommandDeps {
   treeProvider: ContextTreeProvider;
   binaryInfo: BinaryInfo;
   logger: vscode.OutputChannel;
+}
+
+type TurnAwareTransport = ITransportClient & TurnLifecycleClient;
+
+function isTurnAwareTransport(transport: ITransportClient): transport is TurnAwareTransport {
+  return (
+    typeof transport.beginTurn === "function" &&
+    typeof transport.completeTurn === "function" &&
+    typeof transport.failTurn === "function"
+  );
+}
+
+async function withRecordedTurn<T>(
+  transport: ITransportClient,
+  prompt: string,
+  summary: string,
+  run: () => Promise<T>,
+  options: {
+    successSummary?: string | ((result: T) => string);
+    failureSummary?: string | ((error: unknown) => string);
+  } = {},
+): Promise<T> {
+  if (!isTurnAwareTransport(transport)) {
+    return run();
+  }
+
+  const turnId = await transport.beginTurn(prompt, summary);
+  try {
+    const result = await run();
+    const successSummary =
+      typeof options.successSummary === "function"
+        ? options.successSummary(result)
+        : options.successSummary ?? `${summary} completed`;
+    await transport.completeTurn(turnId, successSummary);
+    return result;
+  } catch (error) {
+    const failureSummary =
+      typeof options.failureSummary === "function"
+        ? options.failureSummary(error)
+        : options.failureSummary ?? `${summary} failed`;
+    await transport.failTurn(turnId, error, failureSummary);
+    throw error;
+  }
 }
 
 async function pickWorkspaceFolder(): Promise<vscode.WorkspaceFolder | undefined> {
@@ -49,7 +92,15 @@ export function registerCommands(
 
     vscode.commands.registerCommand("afs.context.discover", async () => {
       try {
-        const contexts = await contextService.discover();
+        const contexts = await withRecordedTurn(
+          transport,
+          "Discover AFS contexts for the open VS Code workspace.",
+          "Discover AFS contexts",
+          async () => contextService.discover(),
+          {
+            successSummary: (result) => `Discovered ${result.length} context(s)`,
+          },
+        );
         treeProvider.refresh();
         vscode.window.showInformationMessage(`Found ${contexts.length} context(s)`);
       } catch (err) {
@@ -78,7 +129,15 @@ export function registerCommands(
       }
 
       try {
-        const result = await contextService.init(folder.uri.fsPath, { force });
+        const result = await withRecordedTurn(
+          transport,
+          `Initialize AFS context for ${folder.uri.fsPath}${force ? " (force)" : ""}`,
+          "Initialize AFS context",
+          async () => contextService.init(folder.uri.fsPath, { force }),
+          {
+            successSummary: (created) => `Initialized context at ${created.context_path}`,
+          },
+        );
         treeProvider.refresh();
         vscode.window.showInformationMessage(
           `Initialized context at ${result.context_path}`,
@@ -116,11 +175,20 @@ export function registerCommands(
 
       try {
         const contextPath = path.join(folder.uri.fsPath, ".context");
-        const mounted = await contextService.mount(
-          sourcePath,
-          mountType as MountType,
-          contextPath,
-          alias,
+        const mounted = await withRecordedTurn(
+          transport,
+          `Mount ${sourcePath} as ${alias ?? suggestedAlias} in ${mountType}`,
+          "Mount AFS context source",
+          async () =>
+            contextService.mount(
+              sourcePath,
+              mountType as MountType,
+              contextPath,
+              alias,
+            ),
+          {
+            successSummary: (result) => `Mounted ${result.name} in ${result.mount_type}`,
+          },
         );
         treeProvider.refresh();
         vscode.window.showInformationMessage(
@@ -147,20 +215,33 @@ export function registerCommands(
 
       try {
         const contextPath = path.join(folder.uri.fsPath, ".context");
-        const removed = await contextService.unmount(
-          mountType as MountType,
-          alias.trim(),
-          contextPath,
+        const trimmedAlias = alias.trim();
+        const removed = await withRecordedTurn(
+          transport,
+          `Unmount ${trimmedAlias} from ${mountType}`,
+          "Unmount AFS context source",
+          async () =>
+            contextService.unmount(
+              mountType as MountType,
+              trimmedAlias,
+              contextPath,
+            ),
+          {
+            successSummary: (result) =>
+              result
+                ? `Unmounted ${trimmedAlias} from ${mountType}`
+                : `No mount named ${trimmedAlias} found in ${mountType}`,
+          },
         );
         treeProvider.refresh();
         if (!removed) {
           vscode.window.showWarningMessage(
-            `No mount named "${alias.trim()}" found in ${mountType}.`,
+            `No mount named "${trimmedAlias}" found in ${mountType}.`,
           );
           return;
         }
         vscode.window.showInformationMessage(
-          `Unmounted ${alias.trim()} from ${mountType}.`,
+          `Unmounted ${trimmedAlias} from ${mountType}.`,
         );
       } catch (err) {
         vscode.window.showErrorMessage(`Unmount failed: ${err}`);
@@ -172,16 +253,27 @@ export function registerCommands(
       if (!folders?.length) return;
       const contextPath = `${folders[0].uri.fsPath}/.context`;
       try {
-        await vscode.window.withProgress(
+        await withRecordedTurn(
+          transport,
+          `Rebuild AFS context index for ${contextPath}`,
+          "Rebuild AFS index",
+          async () =>
+            vscode.window.withProgress(
+              {
+                location: vscode.ProgressLocation.Notification,
+                title: "Rebuilding AFS index...",
+              },
+              async () => {
+                const summary = await indexService.rebuild(contextPath);
+                vscode.window.showInformationMessage(
+                  `Index rebuilt: ${summary.rows_written} rows, ${summary.errors.length} errors`,
+                );
+                return summary;
+              },
+            ),
           {
-            location: vscode.ProgressLocation.Notification,
-            title: "Rebuilding AFS index...",
-          },
-          async () => {
-            const summary = await indexService.rebuild(contextPath);
-            vscode.window.showInformationMessage(
-              `Index rebuilt: ${summary.rows_written} rows, ${summary.errors.length} errors`,
-            );
+            successSummary: (summary) =>
+              `Index rebuilt with ${summary.rows_written} rows and ${summary.errors.length} errors`,
           },
         );
         treeProvider.refresh();
@@ -199,25 +291,37 @@ export function registerCommands(
       if (!folders?.length) return;
       const contextPath = `${folders[0].uri.fsPath}/.context`;
       try {
-        const entries = await indexService.query(contextPath, query);
-        if (entries.length === 0) {
-          vscode.window.showInformationMessage("No results found.");
-          return;
-        }
-        const picked = await vscode.window.showQuickPick(
-          entries.map((e) => ({
-            label: e.relative_path,
-            description: `${e.mount_type} (${e.size_bytes} bytes)`,
-            detail: e.absolute_path,
-          })),
-          { placeHolder: `${entries.length} results for "${query}"` },
+        await withRecordedTurn(
+          transport,
+          query,
+          "Search AFS context index",
+          async () => {
+            const entries = await indexService.query(contextPath, query);
+            if (entries.length === 0) {
+              vscode.window.showInformationMessage("No results found.");
+              return entries;
+            }
+            const picked = await vscode.window.showQuickPick(
+              entries.map((e) => ({
+                label: e.relative_path,
+                description: `${e.mount_type} (${e.size_bytes} bytes)`,
+                detail: e.absolute_path,
+              })),
+              { placeHolder: `${entries.length} results for "${query}"` },
+            );
+            if (picked?.detail) {
+              const doc = await vscode.workspace.openTextDocument(
+                vscode.Uri.file(picked.detail),
+              );
+              await vscode.window.showTextDocument(doc);
+            }
+            return entries;
+          },
+          {
+            successSummary: (entries) => `Context query returned ${entries.length} result(s)`,
+            failureSummary: `Context query failed for: ${query}`,
+          },
         );
-        if (picked?.detail) {
-          const doc = await vscode.workspace.openTextDocument(
-            vscode.Uri.file(picked.detail),
-          );
-          await vscode.window.showTextDocument(doc);
-        }
       } catch (err) {
         vscode.window.showErrorMessage(`Query failed: ${err}`);
       }
