@@ -32,6 +32,8 @@ def build_model_system_prompt(
     role: str = "",
     context_path: Path | None = None,
     session_state: dict[str, Any] | None = None,
+    pack_state: dict[str, Any] | None = None,
+    skills_state: dict[str, Any] | None = None,
     workflow: str | None = None,
     tool_profile: str | None = None,
     token_budget: int = 0,
@@ -44,6 +46,8 @@ def build_model_system_prompt(
         role: Specific role within the family (e.g., "echo", "din", "scribe").
         context_path: AFS .context root for session bootstrap injection.
         session_state: Pre-built bootstrap summary (if already available).
+        pack_state: Prepared AFS session-pack metadata.
+        skills_state: Prepared AFS skill-match metadata.
         workflow: AFS workflow name for model hints.
         tool_profile: AFS tool profile for capability hints.
         token_budget: If > 0, truncate dynamic sections to fit.
@@ -80,6 +84,26 @@ def build_model_system_prompt(
             cacheable=False,
             priority=70,
             label="workflow_hints",
+        ))
+
+    # --- Dynamic section: session-pack context (query/task/pack mode) ---
+    pack_block = _pack_context_block(pack_state)
+    if pack_block:
+        sections.append(PromptSection(
+            content=pack_block,
+            cacheable=False,
+            priority=60,
+            label="pack_context",
+        ))
+
+    # --- Dynamic section: skill matches for the active task/session ---
+    skills_block = _skills_context_block(skills_state)
+    if skills_block:
+        sections.append(PromptSection(
+            content=skills_block,
+            cacheable=False,
+            priority=55,
+            label="skills_context",
         ))
 
     # --- Dynamic section: session context (scratchpad, diff, memory) ---
@@ -279,6 +303,73 @@ def _session_context_block(
                 lines.append(f"- {step}")
 
     return "\n".join(lines)
+
+
+def _pack_context_block(pack_state: dict[str, Any] | None) -> str:
+    if not isinstance(pack_state, dict) or not pack_state.get("available"):
+        return ""
+
+    lines = ["## Session Pack"]
+    query = str(pack_state.get("query", "") or "").strip()
+    task = str(pack_state.get("task", "") or "").strip()
+    model = str(pack_state.get("model", "") or "").strip()
+    workflow = str(pack_state.get("workflow", "") or "").strip()
+    tool_profile = str(pack_state.get("tool_profile", "") or "").strip()
+    pack_mode = str(pack_state.get("pack_mode", "") or "").strip()
+    estimated_tokens = pack_state.get("estimated_tokens")
+
+    if query:
+        lines.append(f"Query focus: {query[:400]}")
+    if task:
+        lines.append(f"Task focus: {task[:400]}")
+    if model or workflow or tool_profile or pack_mode:
+        summary_bits = []
+        if model:
+            summary_bits.append(f"model={model}")
+        if workflow:
+            summary_bits.append(f"workflow={workflow}")
+        if tool_profile:
+            summary_bits.append(f"tool_profile={tool_profile}")
+        if pack_mode:
+            summary_bits.append(f"pack_mode={pack_mode}")
+        lines.append(f"Pack settings: {', '.join(summary_bits)}")
+    if isinstance(estimated_tokens, int) and estimated_tokens > 0:
+        lines.append(f"Pack tokens: {estimated_tokens}")
+
+    return "\n".join(lines) if len(lines) > 1 else ""
+
+
+def _skills_context_block(skills_state: dict[str, Any] | None) -> str:
+    if not isinstance(skills_state, dict) or not skills_state.get("available"):
+        return ""
+
+    matches = skills_state.get("matches", [])
+    if not isinstance(matches, list) or not matches:
+        return ""
+
+    lines = ["## Relevant Skills"]
+    for match in matches[:5]:
+        if not isinstance(match, dict):
+            continue
+        name = str(match.get("name", "") or "").strip()
+        if not name:
+            continue
+        score = match.get("score")
+        triggers = match.get("triggers", [])
+        line = name
+        if isinstance(score, int):
+            line += f" (score={score})"
+        if isinstance(triggers, list) and triggers:
+            trigger_values = [
+                str(trigger).strip()
+                for trigger in triggers
+                if isinstance(trigger, str) and str(trigger).strip()
+            ]
+            if trigger_values:
+                line += f" triggers={', '.join(trigger_values[:4])}"
+        lines.append(f"- {line}")
+
+    return "\n".join(lines) if len(lines) > 1 else ""
 
 
 def _apply_budget(sections: list[PromptSection], budget: int) -> list[PromptSection]:

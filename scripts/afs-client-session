@@ -201,6 +201,27 @@ CLIENT_SESSION_PROMPT_FILE_ENV_VAR="AFS_${CLIENT_ENV_PREFIX}_SESSION_PROMPT_FILE
 SESSION_PROMPT_FILE="${PROMPT_FILE_OVERRIDE:-${!CLIENT_SESSION_PROMPT_FILE_ENV_VAR:-${AFS_CLIENT_SESSION_PROMPT_FILE:-}}}"
 CLIENT_SESSION_TURN_ID_ENV_VAR="AFS_${CLIENT_ENV_PREFIX}_SESSION_TURN_ID"
 SESSION_TURN_ID="${TURN_ID_OVERRIDE:-${!CLIENT_SESSION_TURN_ID_ENV_VAR:-${AFS_CLIENT_SESSION_TURN_ID:-}}}"
+SESSION_PROMPT_TEXT=""
+
+if [ -n "${SESSION_PROMPT_FILE}" ]; then
+  if [ ! -r "${SESSION_PROMPT_FILE}" ]; then
+    echo "prompt file not readable: ${SESSION_PROMPT_FILE}" >&2
+    exit 1
+  fi
+  SESSION_PROMPT_TEXT="$(cat "${SESSION_PROMPT_FILE}")"
+elif [ -n "${SESSION_PROMPT}" ]; then
+  SESSION_PROMPT_TEXT="${SESSION_PROMPT}"
+fi
+
+if [ -z "${SESSION_QUERY}" ] && [ -n "${SESSION_PROMPT_TEXT}" ]; then
+  SESSION_QUERY="${SESSION_PROMPT_TEXT}"
+fi
+if [ -z "${SESSION_TASK}" ] && [ -n "${SESSION_PROMPT_TEXT}" ]; then
+  SESSION_TASK="${SESSION_PROMPT_TEXT}"
+fi
+if [ -z "${SKILLS_PROMPT}" ] && [ -n "${SESSION_PROMPT_TEXT}" ]; then
+  SKILLS_PROMPT="${SESSION_PROMPT_TEXT}"
+fi
 
 generate_session_token() {
   local prefix="$1"
@@ -259,6 +280,7 @@ payload = json.loads(sys.argv[1])
 bootstrap = (payload.get("bootstrap") or {}).get("artifact_paths") or {}
 pack = (payload.get("pack") or {}).get("artifact_paths") or {}
 skills = (payload.get("skills") or {}).get("artifact_paths") or {}
+prompt = (payload.get("prompt") or {}).get("artifact_paths") or {}
 artifacts = payload.get("artifact_paths") or {}
 print(bootstrap.get("json", ""))
 print(bootstrap.get("markdown", ""))
@@ -266,6 +288,8 @@ print(payload.get("context_path", ""))
 print(pack.get("json", ""))
 print(pack.get("markdown", ""))
 print(skills.get("json", ""))
+print(prompt.get("json", ""))
+print(prompt.get("text", ""))
 print(artifacts.get("json", ""))
 PY
   )
@@ -275,7 +299,9 @@ PY
   export AFS_SESSION_PACK_JSON="${bootstrap_fields[3]:-}"
   export AFS_SESSION_PACK_MARKDOWN="${bootstrap_fields[4]:-}"
   export AFS_SESSION_SKILLS_JSON="${bootstrap_fields[5]:-}"
-  export AFS_SESSION_CLIENT_PAYLOAD_JSON="${bootstrap_fields[6]:-}"
+  export AFS_SESSION_SYSTEM_PROMPT_JSON="${bootstrap_fields[6]:-}"
+  export AFS_SESSION_SYSTEM_PROMPT_TEXT="${bootstrap_fields[7]:-}"
+  export AFS_SESSION_CLIENT_PAYLOAD_JSON="${bootstrap_fields[8]:-}"
 fi
 
 if [ -n "${AFS_SESSION_BOOTSTRAP_MARKDOWN:-}" ]; then
@@ -286,6 +312,9 @@ if [ -n "${AFS_SESSION_PACK_MARKDOWN:-}" ]; then
 fi
 if [ -n "${AFS_SESSION_SKILLS_JSON:-}" ]; then
   echo "AFS skills (${CLIENT_LABEL}): ${AFS_SESSION_SKILLS_JSON}" >&2
+fi
+if [ -n "${AFS_SESSION_SYSTEM_PROMPT_TEXT:-}" ]; then
+  echo "AFS system prompt (${CLIENT_LABEL}): ${AFS_SESSION_SYSTEM_PROMPT_TEXT}" >&2
 fi
 if [ -n "${AFS_SESSION_CLIENT_PAYLOAD_JSON:-}" ]; then
   echo "AFS session payload (${CLIENT_LABEL}): ${AFS_SESSION_CLIENT_PAYLOAD_JSON}" >&2

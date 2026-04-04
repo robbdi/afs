@@ -7,6 +7,7 @@ import time
 from collections.abc import Sequence
 from pathlib import Path
 
+from ..llm_memory import create_summarizer
 from ..memory_consolidation import check_consolidation_gates, consolidate_history_to_memory
 from .base import (
     AgentResult,
@@ -103,6 +104,20 @@ def _run_consolidation(args: argparse.Namespace, config) -> AgentResult:
         else None
     )
 
+    # Optionally wire up LLM-assisted summarization from config.
+    consolidation_cfg = config.memory_consolidation
+    summarizer_instance = create_summarizer(
+        summarize_with_llm=consolidation_cfg.summarize_with_llm,
+        summarizer_provider=consolidation_cfg.summarizer_provider,
+        summarizer_model=consolidation_cfg.summarizer_model,
+        lock_dir=context_root if context_root.exists() else None,
+    )
+    summarizer_fn = (
+        summarizer_instance.summarize_events
+        if summarizer_instance is not None
+        else None
+    )
+
     started_at = now_iso()
     start = time.monotonic()
     consolidation = consolidate_history_to_memory(
@@ -115,6 +130,7 @@ def _run_consolidation(args: argparse.Namespace, config) -> AgentResult:
         max_events_per_entry=args.max_events_per_entry,
         include_event_types=args.event_types,
         write_markdown=not args.no_markdown,
+        summarizer=summarizer_fn,
     )
     duration = time.monotonic() - start
 

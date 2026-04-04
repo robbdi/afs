@@ -116,6 +116,90 @@ def test_gemini_status_detects_child_indexes_under_context_root(
     assert "1 index roots, 2 docs" in embedding_check["detail"]
 
 
+# ---------------------------------------------------------------------------
+# Gemini status command
+# ---------------------------------------------------------------------------
+
+
+def test_gemini_status_runs_without_api_key(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    """Status command should complete gracefully even without API keys."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+
+    config = AFSConfig()
+    monkeypatch.setattr(gemini, "_load_cli_config", lambda _args: config)
+    monkeypatch.setattr(
+        gemini,
+        "find_afs_mcp_registrations",
+        lambda: {"gemini": [], "claude": [], "codex": []},
+    )
+
+    exit_code = gemini.gemini_status_command(_base_args(skip_ping=True))
+    captured = capsys.readouterr()
+
+    # The command returns 1 because several checks fail, but it should not crash
+    assert exit_code in (0, 1)
+    assert "API key" in captured.out or "NOT SET" in captured.out
+
+
+def test_gemini_status_json_produces_valid_json(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    """--json flag should produce a parseable JSON payload with expected keys."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+
+    config = AFSConfig()
+    monkeypatch.setattr(gemini, "_load_cli_config", lambda _args: config)
+    monkeypatch.setattr(
+        gemini,
+        "find_afs_mcp_registrations",
+        lambda: {"gemini": [], "claude": [], "codex": []},
+    )
+
+    exit_code = gemini.gemini_status_command(_base_args(json=True, skip_ping=True))
+    assert exit_code == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert "checks" in payload
+    assert "embedding_index" in payload
+    assert "api_latency" in payload
+    check_names = {c["name"] for c in payload["checks"]}
+    assert "API key" in check_names
+    assert "API ping" in check_names
+
+
+def test_gemini_status_skip_ping_flag_is_respected(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    """When --skip-ping is set, API ping should show 'skipped' even if key exists."""
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key-fake")
+
+    config = AFSConfig()
+    monkeypatch.setattr(gemini, "_load_cli_config", lambda _args: config)
+    monkeypatch.setattr(
+        gemini,
+        "find_afs_mcp_registrations",
+        lambda: {"gemini": [], "claude": [], "codex": []},
+    )
+
+    exit_code = gemini.gemini_status_command(_base_args(json=True, skip_ping=True))
+    assert exit_code == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    api_ping = next(c for c in payload["checks"] if c["name"] == "API ping")
+    assert api_ping["detail"] == "skipped"
+    assert payload["api_latency"]["tested"] is False
+
+
 def test_gemini_context_search_merges_indexed_children_and_uses_query_task_type(
     tmp_path: Path,
     monkeypatch,

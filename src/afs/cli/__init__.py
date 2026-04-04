@@ -22,6 +22,7 @@ from . import (
     approvals,
     briefing,
     bundle,
+    cache,
     claude,
     context,
     core,
@@ -135,6 +136,9 @@ def build_parser(argv: Iterable[str] | None = None) -> argparse.ArgumentParser:
 
     # Register approvals commands
     approvals.register_parsers(subparsers)
+
+    # Register cache management commands
+    cache.register_parsers(subparsers)
 
     # Register context commands (context, graph, workspace)
     context.register_parsers(subparsers)

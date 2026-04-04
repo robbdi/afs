@@ -110,6 +110,13 @@ def test_session_prepare_client_command_outputs_artifacts(
     assert payload["skills"]["artifact_paths"]["json"].endswith("session_skills_codex.json")
     assert Path(payload["skills"]["artifact_paths"]["json"]).exists()
     assert payload["skills"]["matches"][0]["name"] == "agentic-background"
+    assert payload["prompt"]["artifact_paths"]["text"].endswith("session_system_prompt_codex.txt")
+    assert Path(payload["prompt"]["artifact_paths"]["text"]).exists()
+    assert payload["prompt"]["artifact_paths"]["json"].endswith("session_system_prompt_codex.json")
+    assert Path(payload["prompt"]["artifact_paths"]["json"]).exists()
+    prompt_text = Path(payload["prompt"]["artifact_paths"]["text"]).read_text(encoding="utf-8")
+    assert "## Session Context" in prompt_text
+    assert "Prompt contract:" in prompt_text
     assert payload["artifact_paths"]["json"].endswith("session_client_codex.json")
     assert Path(payload["artifact_paths"]["json"]).exists()
     assert payload["integration"]["notify_command"] == "afs session event"

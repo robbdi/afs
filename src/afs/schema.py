@@ -581,6 +581,13 @@ class MemoryConsolidationConfig:
     gate_min_events: int = 20
     gate_min_sessions: int = 3
 
+    # LLM-assisted summarization — when enabled, memory entries use
+    # natural-language summaries produced by an LLM instead of the
+    # mechanical counter-based format.  Falls back gracefully on failure.
+    summarize_with_llm: bool = False
+    summarizer_provider: str = "local"
+    summarizer_model: str = ""
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> MemoryConsolidationConfig:
         interval_seconds = data.get("interval_seconds", cls().interval_seconds)
@@ -632,6 +639,19 @@ class MemoryConsolidationConfig:
             gate_min_sessions=int(data.get("gate_min_sessions", cls().gate_min_sessions))
             if isinstance(data.get("gate_min_sessions"), (int, float))
             else cls().gate_min_sessions,
+            summarize_with_llm=bool(
+                data.get("summarize_with_llm", cls().summarize_with_llm)
+            ),
+            summarizer_provider=str(
+                data.get("summarizer_provider", cls().summarizer_provider)
+            ).strip()
+            if isinstance(data.get("summarizer_provider"), str)
+            else cls().summarizer_provider,
+            summarizer_model=str(
+                data.get("summarizer_model", cls().summarizer_model)
+            ).strip()
+            if isinstance(data.get("summarizer_model"), str)
+            else cls().summarizer_model,
         )
 
 
@@ -760,6 +780,25 @@ class HivemindConfig:
 
 
 @dataclass
+class SessionPackCacheConfig:
+    enabled: bool = True
+    ttl_seconds: int = 300
+    cache_dir: Path = field(default_factory=lambda: Path.home() / ".config" / "afs" / "cache")
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SessionPackCacheConfig:
+        ttl_seconds = data.get("ttl_seconds", cls().ttl_seconds)
+        if not isinstance(ttl_seconds, (int, float)) or int(ttl_seconds) < 0:
+            ttl_seconds = cls().ttl_seconds
+        cache_dir = data.get("cache_dir")
+        return cls(
+            enabled=bool(data.get("enabled", True)),
+            ttl_seconds=int(ttl_seconds),
+            cache_dir=_as_path(cache_dir) if isinstance(cache_dir, (str, Path)) else cls().cache_dir,
+        )
+
+
+@dataclass
 class AFSConfig:
     general: GeneralConfig = field(default_factory=GeneralConfig)
     plugins: PluginsConfig = field(default_factory=PluginsConfig)
@@ -778,6 +817,7 @@ class AFSConfig:
     context_index: ContextIndexConfig = field(default_factory=ContextIndexConfig)
     sensitivity: SensitivityConfig = field(default_factory=SensitivityConfig)
     hivemind: HivemindConfig = field(default_factory=HivemindConfig)
+    session_pack_cache: SessionPackCacheConfig = field(default_factory=SessionPackCacheConfig)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> AFSConfig:
@@ -802,6 +842,7 @@ class AFSConfig:
         context_index = ContextIndexConfig.from_dict(data.get("context_index", {}))
         sensitivity = SensitivityConfig.from_dict(data.get("sensitivity", {}))
         hivemind = HivemindConfig.from_dict(data.get("hivemind", {}))
+        session_pack_cache = SessionPackCacheConfig.from_dict(data.get("session_pack_cache", {}))
         return cls(
             general=general,
             plugins=plugins,
@@ -818,6 +859,7 @@ class AFSConfig:
             context_index=context_index,
             sensitivity=sensitivity,
             hivemind=hivemind,
+            session_pack_cache=session_pack_cache,
         )
 
 

@@ -41,6 +41,8 @@ def _write_fake_afs_cli(
     pack_json: Path,
     pack_markdown: Path,
     skills_json: Path,
+    prompt_json: Path,
+    prompt_text: Path,
     payload_json: Path,
     context_root: Path,
 ) -> Path:
@@ -73,6 +75,12 @@ def _write_fake_afs_cli(
         "  \"skills\": {\n"
         "    \"artifact_paths\": {\n"
         f"      \"json\": \"{skills_json}\"\n"
+        "    }\n"
+        "  },\n"
+        "  \"prompt\": {\n"
+        "    \"artifact_paths\": {\n"
+        f"      \"json\": \"{prompt_json}\",\n"
+        f"      \"text\": \"{prompt_text}\"\n"
         "    }\n"
         "  },\n"
         "  \"artifact_paths\": {\n"
@@ -117,6 +125,8 @@ def _write_fake_client(path: Path, log_path: Path) -> Path:
         "    'AFS_SESSION_PACK_JSON': os.environ.get('AFS_SESSION_PACK_JSON'),\n"
         "    'AFS_SESSION_PACK_MARKDOWN': os.environ.get('AFS_SESSION_PACK_MARKDOWN'),\n"
         "    'AFS_SESSION_SKILLS_JSON': os.environ.get('AFS_SESSION_SKILLS_JSON'),\n"
+        "    'AFS_SESSION_SYSTEM_PROMPT_JSON': os.environ.get('AFS_SESSION_SYSTEM_PROMPT_JSON'),\n"
+        "    'AFS_SESSION_SYSTEM_PROMPT_TEXT': os.environ.get('AFS_SESSION_SYSTEM_PROMPT_TEXT'),\n"
         "    'AFS_SESSION_CLIENT_PAYLOAD_JSON': os.environ.get('AFS_SESSION_CLIENT_PAYLOAD_JSON'),\n"
         "    'AFS_SESSION_EVENT_BIN': os.environ.get('AFS_SESSION_EVENT_BIN'),\n"
         "    'AFS_SESSION_DEFAULT_TURN_ID': os.environ.get('AFS_SESSION_DEFAULT_TURN_ID'),\n"
@@ -190,6 +200,8 @@ def _run_client_session(
     pack_json = tmp_path / "session_pack_gemini.json"
     pack_markdown = tmp_path / "session_pack_gemini.md"
     skills_json = tmp_path / "session_skills_gemini.json"
+    prompt_json = tmp_path / "session_system_prompt_gemini.json"
+    prompt_text = tmp_path / "session_system_prompt_gemini.txt"
     payload_json = tmp_path / "session_client_gemini.json"
     context_root = tmp_path / "context"
     payload_json.write_text("{}", encoding="utf-8")
@@ -200,6 +212,8 @@ def _run_client_session(
         pack_json,
         pack_markdown,
         skills_json,
+        prompt_json,
+        prompt_text,
         payload_json,
         context_root,
     )
@@ -378,6 +392,8 @@ def test_afs_client_session_uses_client_specific_allowed_roots(tmp_path: Path) -
     assert payload["AFS_SESSION_PACK_JSON"].endswith("session_pack_gemini.json")
     assert payload["AFS_SESSION_PACK_MARKDOWN"].endswith("session_pack_gemini.md")
     assert payload["AFS_SESSION_SKILLS_JSON"].endswith("session_skills_gemini.json")
+    assert payload["AFS_SESSION_SYSTEM_PROMPT_JSON"].endswith("session_system_prompt_gemini.json")
+    assert payload["AFS_SESSION_SYSTEM_PROMPT_TEXT"].endswith("session_system_prompt_gemini.txt")
     assert payload["AFS_SESSION_CLIENT_PAYLOAD_JSON"].endswith("session_client_gemini.json")
     assert payload["AFS_ACTIVE_CONTEXT_ROOT"].endswith("context")
 
@@ -464,6 +480,8 @@ def test_afs_session_notify_uses_session_env_defaults(tmp_path: Path) -> None:
     pack_json = tmp_path / "session_pack_codex.json"
     pack_markdown = tmp_path / "session_pack_codex.md"
     skills_json = tmp_path / "session_skills_codex.json"
+    prompt_json = tmp_path / "session_system_prompt_codex.json"
+    prompt_text = tmp_path / "session_system_prompt_codex.txt"
     payload_json = tmp_path / "session_client_codex.json"
     context_root = tmp_path / "context"
     _write_fake_afs_cli(
@@ -473,6 +491,8 @@ def test_afs_session_notify_uses_session_env_defaults(tmp_path: Path) -> None:
         pack_json,
         pack_markdown,
         skills_json,
+        prompt_json,
+        prompt_text,
         payload_json,
         context_root,
     )
@@ -534,6 +554,9 @@ def test_afs_client_session_emits_prompt_and_turn_events(tmp_path: Path) -> None
     assert turn_id.startswith("turn-")
 
     calls = payload["_afs_calls"]
+    prepare_call = next(
+        call for call in calls if call.startswith("session prepare-client ")
+    )
     session_start_index = next(
         index for index, call in enumerate(calls) if call.startswith("session hook session_start ")
     )
@@ -550,6 +573,9 @@ def test_afs_client_session_emits_prompt_and_turn_events(tmp_path: Path) -> None
         index for index, call in enumerate(calls) if call.startswith("session hook session_end ")
     )
 
+    assert f"--query {prompt}" in prepare_call
+    assert f"--task {prompt}" in prepare_call
+    assert f"--skills-prompt {prompt}" in prepare_call
     assert session_start_index < prompt_index < turn_started_index < turn_completed_index < session_end_index
     assert any(
         call.startswith(

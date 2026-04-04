@@ -1,4 +1,5 @@
 import { execFile } from "child_process";
+import { randomUUID } from "crypto";
 import * as path from "path";
 import * as vscode from "vscode";
 import type {
@@ -11,9 +12,20 @@ import type {
 } from "../types";
 import type { ITransportClient, ServerCapabilities } from "./types";
 
+interface ExecOptions {
+  includeSessionEnv?: boolean;
+}
+
 /** Fallback transport that invokes the AFS CLI directly. Limited feature set. */
 export class CliClient implements ITransportClient {
   private ready = false;
+  private sessionId = "";
+  private sessionPayloadFile = "";
+  private sessionContextPath = "";
+  private sessionPromptJson = "";
+  private sessionPromptText = "";
+  private sessionWorkspace = "";
+  private toolTaskCounter = 0;
   private readonly _onConnectionStateChanged = new vscode.EventEmitter<ConnectionState>();
   readonly onConnectionStateChanged = this._onConnectionStateChanged.event;
 
@@ -27,7 +39,8 @@ export class CliClient implements ITransportClient {
 
   async initialize(): Promise<void> {
     try {
-      await this.exec(["--help"]);
+      await this.exec(["--help"], { includeSessionEnv: false });
+      await this.ensureSessionHarness();
       this.ready = true;
       this._onConnectionStateChanged.fire("connected");
     } catch (err) {
@@ -46,6 +59,21 @@ export class CliClient implements ITransportClient {
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    await this.ensureSessionHarness();
+    const taskId = this.nextTaskId();
+    await this.recordToolEvent("task_created", name, taskId, `CLI tool started: ${name}`, "running");
+    try {
+      const result = await this.callToolImpl(name, args);
+      await this.recordToolEvent("task_completed", name, taskId, `CLI tool completed: ${name}`, "completed");
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await this.recordToolEvent("task_failed", name, taskId, message, "failed", message);
+      throw err;
+    }
+  }
+
+  private async callToolImpl(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
     // Map MCP tool names to CLI commands
     switch (name) {
       case "context.discover": {
@@ -365,17 +393,203 @@ export class CliClient implements ITransportClient {
   }
 
   dispose(): void {
+    if (this.sessionId) {
+      void this.runSessionHook("session_end", ["--reason", "client_dispose"]).catch((err) => {
+        this.logger.appendLine(`[cli harness] session_end failed: ${err}`);
+      });
+    }
     this.ready = false;
     this._onConnectionStateChanged.dispose();
   }
 
-  private exec(extraArgs: string[]): Promise<string> {
+  private workspaceRoot(): string {
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    return folder?.uri?.fsPath ? path.resolve(folder.uri.fsPath) : process.cwd();
+  }
+
+  private nextTaskId(): string {
+    this.toolTaskCounter += 1;
+    return `vscode-tool-${this.toolTaskCounter}`;
+  }
+
+  private sessionEnv(): Record<string, string> {
+    const env: Record<string, string> = {};
+    if (this.sessionId) env.AFS_SESSION_ID = this.sessionId;
+    if (this.sessionPayloadFile) env.AFS_SESSION_CLIENT_PAYLOAD_JSON = this.sessionPayloadFile;
+    if (this.sessionContextPath) env.AFS_ACTIVE_CONTEXT_ROOT = this.sessionContextPath;
+    if (this.sessionPromptJson) env.AFS_SESSION_SYSTEM_PROMPT_JSON = this.sessionPromptJson;
+    if (this.sessionPromptText) env.AFS_SESSION_SYSTEM_PROMPT_TEXT = this.sessionPromptText;
+    return env;
+  }
+
+  private async ensureSessionHarness(): Promise<void> {
+    if (this.sessionId) {
+      return;
+    }
+
+    this.sessionId = randomUUID().replace(/-/g, "").slice(0, 12);
+    this.sessionWorkspace = this.workspaceRoot();
+
+    try {
+      const payload = await this.execJson(
+        [
+          "session",
+          "prepare-client",
+          "--client",
+          "vscode",
+          "--session-id",
+          this.sessionId,
+          "--cwd",
+          this.sessionWorkspace,
+          "--path",
+          this.sessionWorkspace,
+          "--model",
+          "generic",
+          "--workflow",
+          "general",
+          "--tool-profile",
+          "context_readonly",
+          "--pack-mode",
+          "focused",
+          "--task",
+          "VS Code AFS transport session",
+          "--skills-prompt",
+          "vscode ide transport context filesystem",
+          "--json",
+        ],
+        { includeSessionEnv: false },
+      );
+
+      this.sessionPayloadFile = this.payloadArtifactPath(payload);
+      this.sessionContextPath = this.stringValue(payload.context_path);
+      const promptArtifacts = this.artifactPaths((payload.prompt as Record<string, unknown> | undefined) ?? {});
+      this.sessionPromptJson = promptArtifacts.json ?? "";
+      this.sessionPromptText = promptArtifacts.text ?? "";
+    } catch (err) {
+      this.logger.appendLine(`[cli harness] prepare-client failed: ${err}`);
+      return;
+    }
+
+    try {
+      await this.runSessionHook("session_start");
+    } catch (err) {
+      this.logger.appendLine(`[cli harness] session_start failed: ${err}`);
+    }
+  }
+
+  private async runSessionHook(event: string, extraArgs: string[] = []): Promise<void> {
+    if (!this.sessionId) {
+      return;
+    }
+    const args = [
+      "session",
+      "hook",
+      event,
+      "--client",
+      "vscode",
+      "--session-id",
+      this.sessionId,
+      "--cwd",
+      this.sessionWorkspace || this.workspaceRoot(),
+      "--path",
+      this.sessionWorkspace || this.workspaceRoot(),
+    ];
+    if (this.sessionPayloadFile) {
+      args.push("--payload-file", this.sessionPayloadFile);
+    }
+    args.push(...extraArgs);
+    await this.exec(args, { includeSessionEnv: false });
+  }
+
+  private async runSessionEvent(event: string, extraArgs: string[] = []): Promise<void> {
+    if (!this.sessionId) {
+      return;
+    }
+    const args = [
+      "session",
+      "event",
+      event,
+      "--client",
+      "vscode",
+      "--session-id",
+      this.sessionId,
+      "--cwd",
+      this.sessionWorkspace || this.workspaceRoot(),
+      "--path",
+      this.sessionWorkspace || this.workspaceRoot(),
+    ];
+    if (this.sessionPayloadFile) {
+      args.push("--payload-file", this.sessionPayloadFile);
+    }
+    args.push(...extraArgs);
+    await this.exec(args, { includeSessionEnv: false });
+  }
+
+  private async recordToolEvent(
+    event: "task_created" | "task_completed" | "task_failed",
+    toolName: string,
+    taskId: string,
+    summary: string,
+    status: string,
+    reason = "",
+  ): Promise<void> {
+    try {
+      const args = [
+        "--task-id",
+        taskId,
+        "--task-title",
+        toolName,
+        "--summary",
+        summary,
+        "--status",
+        status,
+      ];
+      if (reason) {
+        args.push("--reason", reason);
+      }
+      await this.runSessionEvent(event, args);
+    } catch (err) {
+      this.logger.appendLine(`[cli harness] ${event} failed: ${err}`);
+    }
+  }
+
+  private payloadArtifactPath(payload: Record<string, unknown>): string {
+    const raw = payload.artifact_paths;
+    if (!raw || typeof raw !== "object") {
+      return "";
+    }
+    return this.stringValue((raw as Record<string, unknown>).json);
+  }
+
+  private artifactPaths(section: Record<string, unknown>): Record<string, string | undefined> {
+    const raw = section.artifact_paths;
+    if (!raw || typeof raw !== "object") {
+      return {};
+    }
+    const entries = raw as Record<string, unknown>;
+    return {
+      json: this.stringValue(entries.json),
+      text: this.stringValue(entries.text),
+      markdown: this.stringValue(entries.markdown),
+    };
+  }
+
+  private stringValue(value: unknown): string {
+    return typeof value === "string" ? value : "";
+  }
+
+  private exec(extraArgs: string[], options: ExecOptions = {}): Promise<string> {
     return new Promise((resolve, reject) => {
       const allArgs = [...this.args, ...extraArgs];
+      const env = {
+        ...process.env,
+        ...this.env,
+        ...(options.includeSessionEnv === false ? {} : this.sessionEnv()),
+      };
       execFile(
         this.command,
         allArgs,
-        { env: { ...process.env, ...this.env }, timeout: this.timeout },
+        { env, timeout: this.timeout },
         (err, stdout, stderr) => {
           if (stderr) this.logger.appendLine(`[cli stderr] ${stderr.trimEnd()}`);
           if (err) return reject(err);
@@ -385,8 +599,8 @@ export class CliClient implements ITransportClient {
     });
   }
 
-  private async execJson(extraArgs: string[]): Promise<Record<string, unknown>> {
-    const output = await this.exec(extraArgs);
+  private async execJson(extraArgs: string[], options: ExecOptions = {}): Promise<Record<string, unknown>> {
+    const output = await this.exec(extraArgs, options);
     return JSON.parse(output) as Record<string, unknown>;
   }
 

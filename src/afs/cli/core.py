@@ -1155,6 +1155,9 @@ def session_prepare_client_command(args: argparse.Namespace) -> int:
     skill_paths = (payload.get("skills") or {}).get("artifact_paths") or {}
     if skill_paths.get("json"):
         print(f"skills: {skill_paths['json']}")
+    prompt_paths = (payload.get("prompt") or {}).get("artifact_paths") or {}
+    if prompt_paths.get("text"):
+        print(f"system_prompt: {prompt_paths['text']}")
     payload_paths = payload.get("artifact_paths") or {}
     if payload_paths.get("json"):
         print(f"payload: {payload_paths['json']}")

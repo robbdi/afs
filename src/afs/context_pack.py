@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,6 +18,8 @@ from .models import MountType
 from .sensitivity import matches_path_rules
 from .session_bootstrap import _build_recommendations, build_session_bootstrap
 from .session_workflows import build_session_execution_profile
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_CONTEXT_PACK_TOKENS = {
     "generic": 8000,
@@ -93,6 +96,25 @@ def build_context_pack(
             max_embedding_results=max_embedding_results,
         )
     )
+
+    # --- Session pack cache: early return before expensive bootstrap/scan ---
+    session_cached = _load_session_pack_cache(
+        manager,
+        context_path,
+        query=query,
+        task=task,
+        model=normalized_model,
+        workflow=workflow,
+        tool_profile=tool_profile,
+        pack_mode=normalized_pack_mode,
+        token_budget=resolved_budget,
+        include_content=resolved_include_content,
+        max_query_results=resolved_max_query_results,
+        max_embedding_results=resolved_max_embedding_results,
+    )
+    if session_cached is not None:
+        return session_cached
+
     execution_profile = build_session_execution_profile(
         model=normalized_model,
         workflow=workflow,
@@ -172,6 +194,21 @@ def build_context_pack(
     }
     pack["cache"]["prefix_hash"] = _context_pack_prefix_hash(pack)
     pack["cache"]["stable_prefix_hash"] = _context_pack_stable_prefix_hash(pack)
+    _write_session_pack_cache(
+        manager,
+        context_path,
+        pack,
+        query=query,
+        task=task,
+        model=normalized_model,
+        workflow=workflow,
+        tool_profile=tool_profile,
+        pack_mode=normalized_pack_mode,
+        token_budget=resolved_budget,
+        include_content=resolved_include_content,
+        max_query_results=resolved_max_query_results,
+        max_embedding_results=resolved_max_embedding_results,
+    )
     return pack
 
 
@@ -402,6 +439,294 @@ def _load_cached_context_pack(
         "hit": True,
     }
     return result
+
+
+def _session_pack_cache_key(
+    context_path: Path,
+    *,
+    query: str,
+    task: str,
+    model: str,
+    workflow: str,
+    tool_profile: str,
+    pack_mode: str,
+    token_budget: int,
+    include_content: bool,
+    max_query_results: int,
+    max_embedding_results: int,
+) -> str:
+    """Compute a lightweight cache key from input parameters only (no bootstrap)."""
+    payload = {
+        "version": CONTEXT_PACK_CACHE_VERSION,
+        "context_path": str(context_path),
+        "query": query,
+        "task": task,
+        "model": model,
+        "workflow": workflow,
+        "tool_profile": tool_profile,
+        "pack_mode": pack_mode,
+        "token_budget": token_budget,
+        "include_content": include_content,
+        "max_query_results": max_query_results,
+        "max_embedding_results": max_embedding_results,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _session_pack_cache_path(manager: AFSManager, cache_key: str) -> Path:
+    """Return the file path for a session pack cache entry."""
+    cache_dir = manager.config.session_pack_cache.cache_dir
+    return cache_dir / f"{cache_key}.json"
+
+
+def _mount_fingerprint(context_path: Path, *, config: Any = None) -> str:
+    """Compute a lightweight fingerprint from mount file mtimes.
+
+    Walks the searchable mount directories and hashes (path, mtime, size)
+    tuples. This is much cheaper than a full bootstrap but detects any
+    file creation, deletion, or content change.
+    """
+    entries: list[str] = []
+    # Include metadata.json
+    meta = context_path / "metadata.json"
+    if meta.exists():
+        try:
+            st = meta.stat()
+            entries.append(f"{meta}:{st.st_mtime}:{st.st_size}")
+        except OSError:
+            pass
+    # Include all files in searchable mount roots
+    for mount_type in DEFAULT_SEARCH_MOUNTS:
+        mount_root = resolve_mount_root(context_path, mount_type, config=config)
+        if not mount_root.exists():
+            continue
+        try:
+            for path in sorted(mount_root.rglob("*")):
+                if not path.is_file():
+                    continue
+                try:
+                    st = path.stat()
+                    entries.append(f"{path}:{st.st_mtime}:{st.st_size}")
+                except OSError:
+                    pass
+        except OSError:
+            pass
+    payload = "\n".join(entries).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _load_session_pack_cache(
+    manager: AFSManager,
+    context_path: Path,
+    *,
+    query: str,
+    task: str,
+    model: str,
+    workflow: str,
+    tool_profile: str,
+    pack_mode: str,
+    token_budget: int,
+    include_content: bool,
+    max_query_results: int,
+    max_embedding_results: int,
+) -> dict[str, Any] | None:
+    """Attempt to load a fresh session pack from the file-based cache.
+
+    Returns the cached pack dict on hit, or None on miss/stale/disabled.
+    """
+    cache_cfg = manager.config.session_pack_cache
+    if not cache_cfg.enabled:
+        logger.debug("session pack cache disabled")
+        return None
+
+    cache_key = _session_pack_cache_key(
+        context_path,
+        query=query,
+        task=task,
+        model=model,
+        workflow=workflow,
+        tool_profile=tool_profile,
+        pack_mode=pack_mode,
+        token_budget=token_budget,
+        include_content=include_content,
+        max_query_results=max_query_results,
+        max_embedding_results=max_embedding_results,
+    )
+    cache_file = _session_pack_cache_path(manager, cache_key)
+    if not cache_file.exists():
+        logger.debug("session pack cache miss: no cache file for key %s", cache_key[:12])
+        return None
+
+    try:
+        payload = json.loads(cache_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        logger.debug("session pack cache miss: unreadable cache file %s", cache_file)
+        return None
+
+    meta = payload.get("_session_cache_meta")
+    if not isinstance(meta, dict):
+        logger.debug("session pack cache miss: missing metadata in %s", cache_file)
+        return None
+
+    # TTL check
+    cached_at = meta.get("cached_at_epoch")
+    if not isinstance(cached_at, (int, float)):
+        logger.debug("session pack cache miss: no cached_at timestamp")
+        return None
+    now = datetime.now(timezone.utc).timestamp()
+    age_seconds = now - cached_at
+    if age_seconds > cache_cfg.ttl_seconds:
+        logger.debug(
+            "session pack cache miss: expired (age=%.1fs, ttl=%ds)",
+            age_seconds,
+            cache_cfg.ttl_seconds,
+        )
+        return None
+
+    # Mount fingerprint invalidation: recompute a lightweight hash of mount
+    # file mtimes/sizes and compare against the stored fingerprint.
+    stored_fingerprint = meta.get("mount_fingerprint", "")
+    current_fingerprint = _mount_fingerprint(context_path, config=manager.config)
+    if current_fingerprint != stored_fingerprint:
+        logger.debug(
+            "session pack cache miss: mount fingerprint changed (stored=%s, current=%s)",
+            stored_fingerprint[:12],
+            current_fingerprint[:12],
+        )
+        return None
+
+    # Valid cache hit
+    pack = payload.get("pack")
+    if not isinstance(pack, dict):
+        logger.debug("session pack cache miss: no pack data in cache file")
+        return None
+
+    pack["cache"] = dict(pack.get("cache") or {})
+    pack["cache"]["hit"] = True
+    pack["cache"]["session_cache_hit"] = True
+    pack["cache"]["session_cache_age_seconds"] = round(age_seconds, 1)
+
+    # Populate artifact_paths from existing artifact files when available,
+    # matching the behavior of the artifact-based cache layer.
+    if "artifact_paths" not in pack:
+        pack_model = pack.get("model", "generic")
+        json_path, markdown_path = _context_pack_artifact_paths(manager, context_path, pack_model)
+        if json_path.exists():
+            pack["artifact_paths"] = {
+                "json": str(json_path),
+                "markdown": str(markdown_path),
+            }
+
+    logger.debug(
+        "session pack cache hit: key=%s age=%.1fs",
+        cache_key[:12],
+        age_seconds,
+    )
+    return pack
+
+
+def _write_session_pack_cache(
+    manager: AFSManager,
+    context_path: Path,
+    pack: dict[str, Any],
+    *,
+    query: str,
+    task: str,
+    model: str,
+    workflow: str,
+    tool_profile: str,
+    pack_mode: str,
+    token_budget: int,
+    include_content: bool,
+    max_query_results: int,
+    max_embedding_results: int,
+) -> None:
+    """Persist a context pack to the session cache for future reuse."""
+    cache_cfg = manager.config.session_pack_cache
+    if not cache_cfg.enabled:
+        return
+
+    cache_key = _session_pack_cache_key(
+        context_path,
+        query=query,
+        task=task,
+        model=model,
+        workflow=workflow,
+        tool_profile=tool_profile,
+        pack_mode=pack_mode,
+        token_budget=token_budget,
+        include_content=include_content,
+        max_query_results=max_query_results,
+        max_embedding_results=max_embedding_results,
+    )
+    cache_file = _session_pack_cache_path(manager, cache_key)
+
+    now = datetime.now(timezone.utc)
+    fingerprint = _mount_fingerprint(context_path, config=manager.config)
+    payload = {
+        "_session_cache_meta": {
+            "cached_at": now.isoformat(),
+            "cached_at_epoch": now.timestamp(),
+            "context_path": str(context_path),
+            "cache_key": cache_key,
+            "mount_fingerprint": fingerprint,
+            "version": CONTEXT_PACK_CACHE_VERSION,
+        },
+        "pack": pack,
+    }
+    try:
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text(
+            json.dumps(payload, indent=2, default=str) + "\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        logger.debug("session pack cache: failed to write %s", cache_file)
+
+
+def clear_pack_cache(context_path: Path | None = None, *, config: Any = None) -> int:
+    """Remove session pack cache files.
+
+    Args:
+        context_path: If given, only clear caches for this context path.
+            If None, clear all session pack cache files.
+        config: Optional AFSConfig instance. Uses default if not provided.
+
+    Returns:
+        Number of cache files removed.
+    """
+    if config is None:
+        from .config import load_config_model
+        config = load_config_model()
+
+    cache_dir = config.session_pack_cache.cache_dir
+    if not cache_dir.exists():
+        return 0
+
+    removed = 0
+    for cache_file in sorted(cache_dir.glob("*.json")):
+        if not cache_file.is_file():
+            continue
+        if context_path is not None:
+            # Only remove files that belong to this context_path
+            try:
+                payload = json.loads(cache_file.read_text(encoding="utf-8"))
+                meta = payload.get("_session_cache_meta", {})
+                cached_context = meta.get("context_path", "")
+                resolved = str(context_path.expanduser().resolve())
+                if cached_context != resolved:
+                    continue
+            except (OSError, json.JSONDecodeError):
+                pass
+        try:
+            cache_file.unlink()
+            removed += 1
+        except OSError:
+            pass
+
+    logger.debug("session pack cache: cleared %d files", removed)
+    return removed
 
 
 def _normalize_model(model: str) -> str:

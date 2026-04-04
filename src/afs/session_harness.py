@@ -9,9 +9,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .chat_registry import load_chat_registry
 from .context_pack import build_context_pack, write_context_pack_artifacts
 from .context_paths import resolve_agent_output_root
 from .manager import AFSManager
+from .model_prompts import build_model_system_prompt
 from .profiles import resolve_active_profile
 from .session_bootstrap import build_session_bootstrap, write_session_bootstrap_artifacts
 from .skills import discover_skills, resolve_skill_roots, score_skill_relevance
@@ -19,6 +21,35 @@ from .skills import discover_skills, resolve_skill_roots, score_skill_relevance
 _RECENT_ACTIVITY_LIMIT = 20
 _PROMPT_PREVIEW_CHARS = 180
 _SUMMARY_PREVIEW_CHARS = 160
+_SYSTEM_PROMPT_PREVIEW_CHARS = 320
+_DEFAULT_SYSTEM_PROMPT_TOKEN_BUDGET = 2000
+_DEFAULT_BASE_PROMPTS = {
+    "generic": (
+        "You are a context-aware assistant operating inside the Agentic File System. "
+        "Use AFS session artifacts, cited repo context, and the declared workflow/tool "
+        "profile before assuming missing facts."
+    ),
+    "codex": (
+        "You are Codex operating inside the Agentic File System. "
+        "Bias toward concrete files, minimal patches, and fast verification while using "
+        "AFS session artifacts as the source of repo context."
+    ),
+    "claude": (
+        "You are Claude operating inside the Agentic File System. "
+        "Keep the loop structured, use AFS session artifacts first, and ground claims in "
+        "the current repo context before expanding scope."
+    ),
+    "gemini": (
+        "You are Gemini operating inside the Agentic File System. "
+        "Use the prepared AFS session artifacts to stay retrieval-first, path-oriented, "
+        "and concise."
+    ),
+    "vscode": (
+        "You are the VS Code AFS harness. "
+        "Keep filesystem and context operations aligned with the prepared AFS session "
+        "contract and report progress through session lifecycle events."
+    ),
+}
 
 _SESSION_ACTIVITY_EVENT_SPECS: tuple[dict[str, str], ...] = (
     {
@@ -89,6 +120,8 @@ def _client_output_paths(
     return {
         "payload_json": output_root / f"session_client_{slug}.json",
         "skills_json": output_root / f"session_skills_{slug}.json",
+        "prompt_json": output_root / f"session_system_prompt_{slug}.json",
+        "prompt_text": output_root / f"session_system_prompt_{slug}.txt",
     }
 
 
@@ -146,6 +179,7 @@ def _default_client_session_payload(
         "bootstrap": {"available": False, "artifact_paths": {}},
         "pack": {"available": False, "artifact_paths": {}},
         "skills": {"available": False, "artifact_paths": {}},
+        "prompt": {"available": False, "artifact_paths": {}},
         "integration": _integration_contract(),
         "activity": _initial_activity_state(),
         "artifact_paths": {},
@@ -181,6 +215,7 @@ def _ensure_client_session_payload_shape(payload: dict[str, Any]) -> dict[str, A
     normalized.setdefault("bootstrap", {"available": False, "artifact_paths": {}})
     normalized.setdefault("pack", {"available": False, "artifact_paths": {}})
     normalized.setdefault("skills", {"available": False, "artifact_paths": {}})
+    normalized.setdefault("prompt", {"available": False, "artifact_paths": {}})
     normalized.setdefault("artifact_paths", {})
     return normalized
 
@@ -277,13 +312,19 @@ def _task_map(active_tasks: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return tasks
 
 
-def _bootstrap_summary(
+def _estimate_tokens(text: str) -> int:
+    if not text.strip():
+        return 0
+    return max(1, (len(text) + 3) // 4)
+
+
+def _bootstrap_bundle(
     manager: AFSManager,
     context_path: Path,
     *,
     client: str,
     write_artifacts: bool,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     summary = build_session_bootstrap(
         manager,
         context_path,
@@ -295,7 +336,7 @@ def _bootstrap_summary(
         if write_artifacts
         else summary.get("artifact_paths") or {}
     )
-    return {
+    payload = {
         "available": True,
         "context_path": summary["context_path"],
         "project": summary["project"],
@@ -304,6 +345,23 @@ def _bootstrap_summary(
         "recommended_actions": list(summary.get("recommended_actions", [])),
         "artifact_paths": artifact_paths,
     }
+    return summary, payload
+
+
+def _bootstrap_summary(
+    manager: AFSManager,
+    context_path: Path,
+    *,
+    client: str,
+    write_artifacts: bool,
+) -> dict[str, Any]:
+    _summary, payload = _bootstrap_bundle(
+        manager,
+        context_path,
+        client=client,
+        write_artifacts=write_artifacts,
+    )
+    return payload
 
 
 def _pack_summary(
@@ -400,6 +458,104 @@ def _skills_summary(
         payload["artifact_paths"] = {"json": str(paths["skills_json"])}
         paths["skills_json"].write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     return payload
+
+
+def _resolve_client_base_prompt(
+    manager: AFSManager,
+    *,
+    client: str,
+    model: str,
+    config_path: Path | None,
+) -> tuple[str, str]:
+    try:
+        registry = load_chat_registry(config=manager.config, config_path=config_path)
+    except Exception:
+        registry = None
+
+    if registry is not None:
+        for candidate in (client, model):
+            entry = registry.models.get(candidate)
+            if entry and entry.system_prompt.strip():
+                return entry.system_prompt.strip(), f"chat_registry:{candidate}"
+
+    for candidate in (client, model, "generic"):
+        base_prompt = _DEFAULT_BASE_PROMPTS.get(candidate, "").strip()
+        if base_prompt:
+            return base_prompt, f"builtin:{candidate}"
+
+    return "", ""
+
+
+def _prompt_summary(
+    manager: AFSManager,
+    context_path: Path,
+    *,
+    client: str,
+    model: str,
+    workflow: str,
+    tool_profile: str,
+    token_budget: int | None,
+    config_path: Path | None,
+    session_state: dict[str, Any],
+    pack_state: dict[str, Any],
+    skills_state: dict[str, Any],
+    write_artifacts: bool,
+) -> dict[str, Any]:
+    base_prompt, base_prompt_source = _resolve_client_base_prompt(
+        manager,
+        client=client,
+        model=model,
+        config_path=config_path,
+    )
+    budget = token_budget if isinstance(token_budget, int) and token_budget > 0 else _DEFAULT_SYSTEM_PROMPT_TOKEN_BUDGET
+    prompt_text = build_model_system_prompt(
+        base_prompt=base_prompt,
+        model_family=model,
+        role=client,
+        session_state=session_state,
+        pack_state=pack_state,
+        skills_state=skills_state,
+        workflow=workflow,
+        tool_profile=tool_profile,
+        token_budget=budget,
+    )
+
+    artifact_paths: dict[str, str] = {}
+    preview = _truncate_text(prompt_text, limit=_SYSTEM_PROMPT_PREVIEW_CHARS) if prompt_text else ""
+    estimated_tokens = _estimate_tokens(prompt_text) if prompt_text else 0
+
+    if write_artifacts and prompt_text:
+        paths = _client_output_paths(manager, context_path, client)
+        prompt_payload = {
+            "client": client,
+            "model_family": model,
+            "role": client,
+            "workflow": workflow,
+            "tool_profile": tool_profile,
+            "base_prompt_source": base_prompt_source,
+            "estimated_tokens": estimated_tokens,
+            "preview": preview,
+            "text": prompt_text,
+        }
+        paths["prompt_text"].write_text(prompt_text + "\n", encoding="utf-8")
+        paths["prompt_json"].write_text(json.dumps(prompt_payload, indent=2) + "\n", encoding="utf-8")
+        artifact_paths = {
+            "text": str(paths["prompt_text"]),
+            "json": str(paths["prompt_json"]),
+        }
+
+    return {
+        "available": bool(prompt_text.strip()),
+        "client": client,
+        "model_family": model,
+        "role": client,
+        "workflow": workflow,
+        "tool_profile": tool_profile,
+        "base_prompt_source": base_prompt_source,
+        "estimated_tokens": estimated_tokens,
+        "preview": preview,
+        "artifact_paths": artifact_paths,
+    }
 
 
 def write_client_session_payload_artifact(
@@ -611,6 +767,12 @@ def build_client_session_payload(
 ) -> dict[str, Any]:
     """Build a client-ready session payload with reusable artifact paths."""
     resolved_context = context_path.expanduser().resolve()
+    bootstrap_state, bootstrap_payload = _bootstrap_bundle(
+        manager,
+        resolved_context,
+        client=client,
+        write_artifacts=write_artifacts,
+    )
     payload: dict[str, Any] = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "client": client,
@@ -618,14 +780,10 @@ def build_client_session_payload(
         "context_path": str(resolved_context),
         "config_path": str(config_path) if config_path else "",
         "cwd": str((cwd or Path.cwd()).expanduser().resolve()),
-        "bootstrap": _bootstrap_summary(
-            manager,
-            resolved_context,
-            client=client,
-            write_artifacts=write_artifacts,
-        ),
+        "bootstrap": bootstrap_payload,
         "pack": {"available": False, "artifact_paths": {}},
         "skills": {"available": False, "artifact_paths": {}},
+        "prompt": {"available": False, "artifact_paths": {}},
         "integration": _integration_contract(),
         "activity": _initial_activity_state(),
         "artifact_paths": {},
@@ -657,6 +815,21 @@ def build_client_session_payload(
             top_k=skills_top_k,
             write_artifacts=write_artifacts,
         )
+
+    payload["prompt"] = _prompt_summary(
+        manager,
+        resolved_context,
+        client=client,
+        model=model,
+        workflow=workflow,
+        tool_profile=tool_profile,
+        token_budget=token_budget,
+        config_path=config_path,
+        session_state=bootstrap_state,
+        pack_state=dict(payload.get("pack") or {}),
+        skills_state=dict(payload.get("skills") or {}),
+        write_artifacts=write_artifacts,
+    )
 
     if write_artifacts:
         write_client_session_payload_artifact(

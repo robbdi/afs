@@ -6,6 +6,8 @@ from afs.model_prompts import build_model_system_prompt
 def test_build_model_system_prompt_includes_session_state_summary() -> None:
     prompt = build_model_system_prompt(
         base_prompt="Base behavior.",
+        workflow="edit_fast",
+        tool_profile="edit_and_verify",
         session_state={
             "project": "afs",
             "profile": "default",
@@ -23,9 +25,33 @@ def test_build_model_system_prompt_includes_session_state_summary() -> None:
             "tasks": {"total": 2, "counts": {"pending": 2}},
             "handoff": {"available": True, "next_steps": ["Ship the MCP refactor."]},
         },
+        pack_state={
+            "available": True,
+            "query": "mcp registry split",
+            "task": "Wire prompt context into the harness.",
+            "model": "codex",
+            "workflow": "edit_fast",
+            "tool_profile": "edit_and_verify",
+            "pack_mode": "focused",
+            "estimated_tokens": 420,
+        },
+        skills_state={
+            "available": True,
+            "matches": [
+                {"name": "agentic-context", "score": 9, "triggers": ["context", "harness"]},
+                {"name": "github:github", "score": 4, "triggers": ["repo"]},
+            ],
+        },
     )
 
     assert "Base behavior." in prompt
+    assert "## Execution Profile" in prompt
+    assert "## Session Pack" in prompt
+    assert "Query focus: mcp registry split" in prompt
+    assert "Task focus: Wire prompt context into the harness." in prompt
+    assert "Pack settings: model=codex, workflow=edit_fast, tool_profile=edit_and_verify, pack_mode=focused" in prompt
+    assert "## Relevant Skills" in prompt
+    assert "- agentic-context (score=9) triggers=context, harness" in prompt
     assert "## Session Context" in prompt
     assert "Project: afs (profile: default)" in prompt
     assert "Scratchpad state: Investigating MCP registry split." in prompt

@@ -8,13 +8,17 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .config import load_config_model
 from .context_paths import resolve_agent_output_root, resolve_mount_root
 from .history import iter_history_events
 from .models import MountType
 from .schema import AFSConfig
+
+# Type alias for the optional LLM summarizer callable.
+# Signature: (events, context_root) -> str | None
+SummarizerCallable = Callable[[list[dict[str, Any]], Path], str | None]
 
 _SELF_SOURCES = {"afs.memory_consolidation", "agent.history-memory"}
 _MAX_HIGHLIGHTS = 8
@@ -74,6 +78,7 @@ def consolidate_history_to_memory(
     max_events_per_entry: int | None = None,
     include_event_types: list[str] | None = None,
     write_markdown: bool | None = None,
+    summarizer: SummarizerCallable | None = None,
 ) -> MemoryConsolidationResult:
     """Summarize new history events into durable memory entries."""
     config = config or load_config_model()
@@ -166,6 +171,17 @@ def consolidate_history_to_memory(
                 context_root=context_root,
                 entry_id=entry_id,
             )
+            # When an LLM summarizer is provided, attempt to replace the
+            # mechanical counter-based output with a natural-language summary.
+            if summarizer is not None:
+                try:
+                    llm_summary = summarizer(batch, context_root)
+                    if isinstance(llm_summary, str) and llm_summary.strip():
+                        entry["output"] = llm_summary.strip()
+                        entry["_metadata"]["summarizer"] = "llm"
+                except Exception:
+                    # Never crash — keep the counter-based entry on failure.
+                    pass
             handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
             result.entries_written += 1
             result.consolidated_events += len(batch)
