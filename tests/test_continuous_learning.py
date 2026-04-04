@@ -18,7 +18,7 @@ try:
         TriggerType,
         UsageLogger,
     )
-except RuntimeError:
+except (RuntimeError, ImportError):
     pytest.skip("afs.continuous moved to afs-ext", allow_module_level=True)
 
 

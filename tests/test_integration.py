@@ -46,7 +46,7 @@ try:
     from afs.registry import EvaluationScores, ModelRegistry
     from afs.registry.models import VersionStatus
     from afs.training.pipeline import DataPipeline, PipelineConfig
-except RuntimeError:
+except (RuntimeError, ImportError):
     pytest.skip("afs.training/afs.continuous moved to afs-ext", allow_module_level=True)
 
 # ============================================================================

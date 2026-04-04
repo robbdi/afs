@@ -43,7 +43,7 @@ def test_generate_claude_settings_with_context_root() -> None:
     settings = generate_claude_settings(Path("/tmp/test"), config=FakeConfig())
     entry = settings["mcpServers"]["afs"]
     assert "env" in entry
-    assert entry["env"]["AFS_CONTEXT_ROOT"] == "/home/user/.context"
+    assert entry["env"]["AFS_CONTEXT_ROOT"] == str(Path("/home/user/.context").expanduser().resolve())
 
 
 def test_generate_claude_settings_prefers_project_config(tmp_path: Path) -> None:

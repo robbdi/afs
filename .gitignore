@@ -18,6 +18,7 @@ data/
 training_data/
 benchmarks/
 benchmark_results/
+evaluations/
 VAST_INSTANCES.md
 
 # Python environments/artifacts
@@ -34,4 +35,6 @@ htmlcov/
 llama.cpp/
 merge_temp.py
 curl_tests/
+dashboard/
 LMSTUDIO_SETUP.md
+personas/

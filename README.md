@@ -1,214 +1,219 @@
-# Agentic File System (AFS)
+# AFS — Agentic File System
 
-**Everything is Context.**
+AFS is an orchestration layer for managing multi-agent systems and context directly within the filesystem. It treats documentation, tools, and memory as mountable context nodes, providing a structured surface for AI agents to operate within a repository.
 
-AFS is an experimental orchestration layer for managing multi-agent swarms and context loops directly within the filesystem. It treats documentation, tools, and memory as mountable context nodes, allowing AI agents to "live" and operate within the repository.
+## Install
+
+```bash
+git clone https://github.com/scawful/afs.git
+cd afs
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+Use the wrapper script for reliable agent invocation (sets `AFS_ROOT` and `PYTHONPATH`):
+
+```bash
+./scripts/afs --help
+```
+
+## Quick Start
+
+```bash
+./scripts/afs init                    # Initialize AFS configuration
+./scripts/afs context init            # Create .context directory structure
+./scripts/afs doctor                  # Diagnose and auto-fix issues
+./scripts/afs health                  # Health check
+```
 
 ## Core Concepts
 
-- **Context Mounting:** Dynamically load relevant documentation, code, and memories into the agent's working context.
-- **Agent Swarms:** Orchestrate multiple specialized agents (Planner, Coder, Critic) to solve complex tasks.
-- **File-Based Memory:** Store long-term memories and project knowledge in a structured, human-readable file system.
-- **Tool Integration:** Expose command-line tools and scripts as callable functions for agents.
+**Context Mounting** — Structured `.context/` directories with typed mounts (knowledge, skills, scratchpad, memory, tasks) that agents can read and write.
+
+**Session System** — Token-budgeted context packs, bootstrap summaries, and client harness for Gemini, Claude, and Codex integrations.
+
+**Agent Supervisor** — Background agent lifecycle management with dependency graphs, restart with exponential backoff, mutex groups, and agent-to-agent handoff.
+
+**Hivemind** — Inter-agent message bus for coordination, with pub/sub channels and structured message routing.
+
+**Memory Consolidation** — Event history rolled up into durable memory entries, with optional LLM-assisted summarization.
+
+**Profiles & Extensions** — Profile-driven context injection via `afs.toml`. Extensions add domain-specific functionality without forking core.
 
 ## Architecture
 
-AFS is built on a modular architecture:
-
-- **Core:** The central engine that manages context, agents, and tool execution.
-- **Services:** Pluggable modules for specific functionalities (e.g., LLM providers, vector databases).
-- **Tools:** Scripts and executables that agents can invoke to perform actions.
-- **Context:** The structured file system where agents operate and store information.
-
-## Profiles and Extensions
-
-Core `afs` now supports profile-driven context injection via `afs.toml`.
-
-- Use `[profiles]` + `[profiles.<name>]` to control `knowledge_mounts`, `skill_roots`, and `model_registries`.
-- Use `[extensions]` + `extensions/*/extension.toml` to load external adapters (for example, a private workspace adapter) without forking core files.
-- Use `[hooks]` for grounding policies and client-session lifecycle hooks, including `session_start`, `session_end`, `user_prompt_submit`, `turn_*`, and `task_*`.
-
-Inspect and apply profiles:
-
-```bash
-./scripts/afs context profile-show --profile work
-./scripts/afs context profile-apply --profile work
-./scripts/afs profile current
-./scripts/afs profile switch work
-./scripts/afs health
+```
+src/afs/
+├── cli/              # 30+ CLI command groups
+├── agents/           # 17 background agents + supervisor
+├── mcp_server.py     # 40+ MCP tools for external clients
+├── context_index.py  # SQLite-backed context indexing and search
+├── context_pack.py   # Token-budgeted context packs with caching
+├── session_*.py      # Session bootstrap, harness, workflows
+├── memory_*.py       # Memory consolidation and LLM summarization
+├── hivemind.py       # Inter-agent message bus
+├── handoff.py        # Structured session handoff protocol
+├── embeddings.py     # Embedding index with Gemini provider
+├── services/         # launchd/systemd service adapters
+├── gates/            # Quality gates and CI integration
+├── continuous/       # A/B testing, triggers, continuous learning
+└── ...
 ```
 
-Run the MCP server for Gemini/other MCP clients:
+## CLI
+
+### Context & Workspace
 
 ```bash
-./scripts/afs mcp serve
-# or, after installing the package into the active environment
-afs mcp serve
-# for Claude Desktop, prefer the direct venv module entrypoint
-$AFS_ROOT/.venv/bin/python -m afs.mcp_server
+afs context discover                  # Find .context roots
+afs context mount <path>              # Mount a context directory
+afs context status                    # Show mount status and health
+afs context query "search term"       # Search the context index
+afs context diff                      # Changes since last session
+afs context pack --model gemini       # Token-budgeted context export
 ```
 
-For Claude Desktop MCP registration, prefer the direct Python module entrypoint
-over the shell wrapper. See `docs/MCP_SERVER.md` for the recommended config and
-for the `initialize` timeout troubleshooting sequence.
+### Agents
+
+```bash
+afs agents list                       # Available agents
+afs agents ps                         # Running agents
+afs agents run <name> [--prompt ...]  # Run an agent
+afs agents capabilities               # Agent capability matrix
+```
+
+### Session
+
+```bash
+afs session bootstrap --json          # Full session context summary
+afs session pack "task" --model gemini --json
+afs session prepare-client --client codex --json
+```
+
+### Memory & Events
+
+```bash
+afs memory status                     # Memory consolidation stats
+afs memory consolidate                # Roll history into memory
+afs events query --last 50            # Recent events
+afs events analytics                  # Event statistics
+```
+
+### Profiles
+
+```bash
+afs profile list                      # Available profiles
+afs profile switch work               # Activate a profile
+afs profile current                   # Show active profile
+```
+
+### Embeddings
+
+```bash
+afs embeddings index --provider gemini --include "*.md"
+afs embeddings search "how to debug a sprite"
+```
+
+### Health & Diagnostics
+
+```bash
+afs doctor --fix                      # Diagnose and repair
+afs health                            # System health check
+afs services status --system          # Service status
+```
+
+## MCP Server
+
+AFS exposes 40+ tools via MCP for use by Gemini, Claude, Codex, and other MCP clients.
+
+```bash
+afs mcp serve                         # Start MCP server
+# Or via direct module entrypoint (preferred for Claude Desktop):
+.venv/bin/python -m afs.mcp_server
+```
+
+**Tool categories:** `fs.*`, `context.*`, `session.*`, `memory.*`, `handoff.*`, `agent.*`, `hivemind.*`, `task.*`, `review.*`, `events.*`
+
+See [docs/MCP_SERVER.md](docs/MCP_SERVER.md) for configuration and tool reference.
+
+## Agents
+
+| Agent | Purpose |
+|-------|---------|
+| `agent-supervisor` | Lifecycle management, dependency graph, restart with backoff |
+| `context-warm` | Background context warming and embedding indexing |
+| `mission-runner` | TOML mission definitions with OODA execution phases |
+| `journal-agent` | Daily templates, stale-TODO alerting, carry-forward |
+| `workspace-analyst` | Codebase health, git drift, dependency scanning |
+| `gemini-workspace-brief` | Gemini-powered workspace briefings |
+| `dashboard-export` | Data export for status bar and dashboard surfaces |
+| `tether-bridge` | Agent findings to ADHD-friendly capture items |
+| `history-memory` | Consolidate event history into durable memory |
+| `context-audit` | Audit contexts for missing directories |
+| `context-inventory` | Inventory contexts and mount counts |
+| `scribe-draft` | Draft responses via configured chat model |
+| `researcher` | Research agent with structured output |
 
 ## Gemini Integration
 
-AFS has first-class Gemini support: embeddings, MCP registration, and context generation.
-
 ```bash
-# One-time setup — user-level Gemini MCP registration
-afs gemini setup
-afs gemini setup --scope project                     # write ./.gemini/settings.json for the current repo
-
-# Check readiness (API key, SDK, MCP, embeddings)
-afs gemini status
-afs gemini status --project afs --context-root ~/src/lab/.context
-
-# Index knowledge with Gemini embedding vectors
-afs embeddings index --knowledge-path ~/.context/knowledge --provider gemini --include "*.md"
-
-# Semantic search
-afs embeddings search --knowledge-path ~/.context/knowledge --provider gemini "how to debug a sprite"
-
-# Generate context for a Gemini session
-afs gemini context "sprite development"                    # search mode
-afs gemini context "sprite development" --include-content  # with full content
-afs gemini context --project afs "sqlite index"            # search a specific project subtree
-afs gemini context                                         # full knowledge index
-
-# Skip Google Workspace lookups in the morning briefing
-afs briefing --no-gws
-
-# Optional Google Workspace helper commands
-afs gws status
-afs gws agenda
+afs gemini setup                      # Register MCP for Gemini CLI
+afs gemini status                     # Check API key, SDK, embeddings
+afs gemini context "search query"     # Generate context for Gemini session
+afs gemini context --include-content  # With full file content
 ```
 
-`afs gemini setup` writes the repo wrapper entry by default, so Gemini CLI uses
-the same `AFS_ROOT`/`PYTHONPATH` assumptions as `./scripts/afs`. Use
-`--python-module` only when you explicitly want `sys.executable -m afs.mcp_server`.
+Install: `pip install -e ".[gemini]"`
 
-Install the optional Gemini dependency: `pip install -e ".[gemini]"`
+## Client Wrappers
 
-See `docs/EMBEDDINGS.md` for the full embedding system reference.
-See `docs/EMACS_INTEGRATION.md` for the bundled Emacs/Spacemacs helper.
+AFS ships wrapper scripts that inject session context into native clients:
 
-Tune context index defaults in `afs.toml`:
+```bash
+./scripts/afs-claude --prompt "task description"
+./scripts/afs-codex --prompt "task description"
+./scripts/afs-gemini --prompt "task description"
+```
+
+Wrappers export `AFS_SESSION_BOOTSTRAP_*`, `AFS_SESSION_PACK_*`, `AFS_SESSION_SYSTEM_PROMPT_*` and emit lifecycle events (`user_prompt_submit`, `turn_started`, `turn_completed`).
+
+## Configuration
+
+`afs.toml` in the project root:
 
 ```toml
+[general]
+context_root = "~/.context"
+
+[profiles.work]
+knowledge_mounts = ["~/docs/work"]
+skill_roots = ["~/skills"]
+
 [context_index]
 enabled = true
-db_filename = "context_index.sqlite3"
 auto_index = true
-auto_refresh = true
 include_content = true
-max_file_size_bytes = 262144
-max_content_chars = 12000
+
+[hooks]
+session_start = ["echo 'session started'"]
 ```
-
-## Getting Started
-
-1.  **Installation:**
-    ```bash
-    git clone https://github.com/scawful/afs.git
-    cd afs
-    python3 -m venv .venv
-    source .venv/bin/activate
-    python3 -m pip install -e .
-    ```
-
-2.  **Preferred local entrypoint:**
-    ```bash
-    ./scripts/afs --help
-    ```
-    The wrapper sets `AFS_ROOT` and `PYTHONPATH`, which is more reliable for agents than
-    depending on the shell's default `python`.
-
-3.  **Configuration:**
-    Initialize config and context:
-    ```bash
-    ./scripts/afs init
-    ./scripts/afs context init
-    ./scripts/afs doctor
-    ```
-
-4.  **Running Agents:**
-    Use the CLI tools to manage context, profiles, skills, embeddings, and MCP.
-
-## Operational Baseline
-
-Use these first when bringing up AFS on a new machine or workspace:
-
-```bash
-./scripts/afs session bootstrap --json
-./scripts/afs doctor
-./scripts/afs health
-./scripts/afs services status --system
-```
-
-`afs doctor --fix` is the fastest path for repairing missing context roots,
-missing required mount directories, untracked/stale mount provenance, and stale
-context indexes.
-
-`afs session pack` is the explicit, token-budgeted follow-on surface for
-Gemini, Claude, Codex, or generic clients when you intentionally need a
-handoff/export packet. Repeated calls with the same bootstrap snapshot and
-pack inputs reuse the stored `session_pack_<model>` artifact instead of
-rebuilding from scratch.
-
-```bash
-./scripts/afs session pack "current task" --model gemini --json
-```
-
-### Client Session Harness
-
-Use the session harness when a wrapper, IDE adapter, or child shell script
-needs a stable contract for AFS context and lifecycle events.
-
-```bash
-./scripts/afs session prepare-client --client codex --json
-./scripts/afs session event user_prompt_submit --client codex --session-id "$AFS_SESSION_ID" --prompt "current task"
-./scripts/afs-session-notify task_progress --task-id bg-1 --summary "Indexing symbols"
-```
-
-- `session prepare-client` writes the shared session payload together with cached bootstrap, pack, skill-match, and system-prompt artifacts.
-- Wrappers such as `afs-codex`, `afs-claude`, and `afs-gemini` export `AFS_SESSION_BOOTSTRAP_*`, `AFS_SESSION_PACK_*`, `AFS_SESSION_SKILLS_JSON`, `AFS_SESSION_SYSTEM_PROMPT_*`, and `AFS_SESSION_CLIENT_PAYLOAD_JSON`.
-- Those wrappers now also hand the prompt artifact to the native client surface when one exists: Codex via `-c model_instructions_file=...`, Claude via `--append-system-prompt-file`, and Gemini via `GEMINI_SYSTEM_MD`. Set `AFS_CLIENT_NATIVE_PROMPT=0` or `AFS_<CLIENT>_NATIVE_PROMPT=0` to keep the handoff at env/artifact level only.
-- When launched with `--prompt`, `--prompt-file`, or `--turn-id`, wrappers also export `AFS_SESSION_EVENT_BIN` / `AFS_SESSION_DEFAULT_TURN_ID` and emit `user_prompt_submit`, `turn_started`, and `turn_completed` / `turn_failed` around the client process.
-- Child scripts can call `afs-session-notify` to append `task_*` lifecycle events without rebuilding session context.
-
-## Training Integrations
-
-AFS also exposes training-oriented surfaces backed by the same context and
-session systems:
-
-```bash
-./scripts/afs training freshness-gate --path ~/src/project-a
-./scripts/afs training extract-sessions --path ~/src/project-a --output ./session_replay_training.jsonl
-./scripts/afs training generate-router-data --config ~/src/project-a/afs.toml
-./scripts/training_watch.sh --debounce 45
-```
-
-These cover pre-training freshness checks, extraction of training samples from
-recorded AFS sessions, router-dataset generation from declared agent
-capabilities, and an optional watch wrapper for local dataset QA workflows.
 
 ## Extensions
 
-Domain-specific functionality (model training, persona configurations, deployment playbooks) can be added via extension plugins. See `docs/EXTENSION_MIGRATION.md` for the extension layout.
+Domain-specific functionality (model training, persona configurations, deployment playbooks) goes in extension packages. See [docs/EXTENSION_MIGRATION.md](docs/EXTENSION_MIGRATION.md).
 
 ## Documentation
 
-See the `docs/` directory for detailed guides and architectural overviews.
-Recommended starting points:
-
-- `docs/index.md`
-- `docs/AGENT_SURFACES.md`
-- `docs/CLI_REFERENCE.md`
-- `docs/PROFILES.md`
-
-Workspace map: `~/src/docs/SOURCE_UNIVERSE_MAP.md`.
+- [docs/index.md](docs/index.md) — Documentation index
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — System architecture
+- [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md) — Full CLI reference
+- [docs/AGENT_SURFACES.md](docs/AGENT_SURFACES.md) — Agent system design
+- [docs/MCP_SERVER.md](docs/MCP_SERVER.md) — MCP server setup and tools
+- [docs/PROFILES.md](docs/PROFILES.md) — Profile system
+- [docs/EMBEDDINGS.md](docs/EMBEDDINGS.md) — Embedding system
+- [docs/MEMORY_SYSTEM.md](docs/MEMORY_SYSTEM.md) — Memory consolidation
+- [docs/EMACS_INTEGRATION.md](docs/EMACS_INTEGRATION.md) — Emacs/Spacemacs helper
 
 ## License
 
